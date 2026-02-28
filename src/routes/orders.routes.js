@@ -1,0 +1,14 @@
+const express = require("express");
+const router = express.Router();
+
+const authMiddleware = require("../middlewares/auth.middleware");
+const requireRole = require("../middlewares/role.middleware");
+const ordersController = require("../controllers/orders.controller");
+
+router.use(authMiddleware);
+router.use(requireRole("customer"));
+
+router.post("/", ordersController.createOrder);
+router.get("/my", ordersController.getMyOrders);
+
+module.exports = router;

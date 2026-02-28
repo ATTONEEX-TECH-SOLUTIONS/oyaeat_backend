@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  admin
+  rider
+  customer
+}
+
+enum BusinessStatus {
+  draft
+  pending_review
+  approved
+  rejected
+  suspended
+}
+
+enum DocumentType {
+  tax_id
+  food_certificate
+  owner_id
+  bank_document
+  business_license
+}
+
+enum OrderStatus {
+  pending
+  preparing
+  ready
+  out_for_delivery
+  delivered
+  cancelled
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  firstName     String
+  lastName      String
+  email         String   @unique
+  phone         String   @unique
+  password      String
+  role          Role     @default(owner)
+  phoneVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  businesses         Business[]
+  phoneVerifications PhoneVerification[]
+
+  // ✅ NEW: customer orders
+  orders Order[]
+}
+
+model PhoneVerification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Business {
+  id              Int            @id @default(autoincrement())
+  ownerId         Int
+  owner           User           @relation(fields: [ownerId], references: [id])
+  name            String
+  type            String
+  streetAddress   String
+  city            String
+  state           String
+  zipCode         String
+  businessPhone   String
+  businessEmail   String
+  websiteUrl      String?
+  description     String?
+  status          BusinessStatus @default(draft)
+  rejectionReason String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  documents  BusinessDocument[]
+  bankDetail BusinessBankDetail?
+
+  menuItems    MenuItem[]
+  staffMembers StaffMember[]
+  orders       Order[]
+}
+
+model BusinessDocument {
+  id         Int          @id @default(autoincrement())
+  businessId Int
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type       DocumentType
+  url        String
+  fileName   String
+  verified   Boolean      @default(false)
+  createdAt  DateTime     @default(now())
+}
+
+model BusinessBankDetail {
+  id            Int      @id @default(autoincrement())
+  businessId    Int      @unique
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bankName      String
+  accountName   String
+  accountNumber String
+  routingNumber String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model MenuItem {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  category    String
+  price       Float
+  description String?
+  imageUrl    String?
+  available   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ✅ NEW reverse relation
+  orderItems OrderItem[]
+
+  @@index([businessId])
+}
+
+model StaffMember {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  fullName String
+  role     String
+  email    String?
+  phone    String?
+  status   String  @default("Active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+model Order {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // ✅ NEW: connect order to a customer user
+  customerId Int?
+  customer   User? @relation(fields: [customerId], references: [id])
+
+  customerName  String
+  customerPhone String?
+  address       String?
+  paymentMethod String?
+  notes         String?
+
+  status OrderStatus @default(pending)
+  total  Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items OrderItem[]
+
+  @@index([businessId])
+  @@index([customerId])
+}
+
+model OrderItem {
+  id      Int   @id @default(autoincrement())
+  orderId Int
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // ✅ NEW: link to menu item ordered
+  menuItemId Int?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id])
+
+  name     String
+  price    Float
+  quantity Int @default(1)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([menuItemId])
+}

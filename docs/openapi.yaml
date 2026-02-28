@@ -1,0 +1,603 @@
+openapi: 3.0.3
+info:
+  title: OyaEat Backend API
+  version: 1.0.0
+  description: REST API for vendor (restaurant) registration and admin review
+security:
+  - bearerAuth: []
+servers:
+  - url: http://localhost:5000
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+  /auth/register:
+    post:
+      summary: Register vendor user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, lastName, email, phone, password]
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+                password:
+                  type: string
+                businessType:
+                  type: string
+      responses:
+        '201':
+          description: User registered, OTP created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  userId:
+                    type: integer
+                  otp:
+                    type: string
+                  nextStep:
+                    type: string
+        '400':
+          description: Validation error
+  /auth/verify-phone:
+    post:
+      summary: Verify phone with OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, otp]
+              properties:
+                userId:
+                  type: integer
+                otp:
+                  type: string
+      responses:
+        '200':
+          description: Phone verified
+        '400':
+          description: Invalid or expired OTP
+  /auth/login:
+    post:
+      summary: Login vendor (restaurant)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login success with dashboard
+          content:
+            application/json:
+              examples:
+                success:
+                  value:
+                    message: Login successful
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                    dashboard:
+                      userId: 1
+                      role: owner
+                      phoneVerified: true
+                      businesses:
+                        - id: 1
+                          name: Cafe Test
+                          status: pending_review
+                          rejectionReason: null
+                          hasDocuments: true
+                          hasBankDetail: true
+                    nextStep: Check business status
+        '401':
+          description: Invalid credentials
+  /admin/auth/login:
+    post:
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Admin login success
+          content:
+            application/json:
+              examples:
+                success:
+                  value:
+                    message: Admin login successful
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                    admin:
+                      id: 2
+                      email: admin@example.com
+                      role: admin
+        '401':
+          description: Invalid admin credentials
+  /vendor/{userId}/business-details:
+    post:
+      summary: Upload business details
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessName, businessType, streetAddress, city, state, zipCode, businessPhone, businessEmail, description]
+              properties:
+                businessName:
+                  type: string
+                businessType:
+                  type: string
+                streetAddress:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                zipCode:
+                  type: string
+                businessPhone:
+                  type: string
+                businessEmail:
+                  type: string
+                websiteUrl:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Business created
+  /vendor/{businessId}/upload-documents:
+    post:
+      summary: Upload verification documents
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                business_license:
+                  type: string
+                  format: binary
+                tax_id:
+                  type: string
+                  format: binary
+                food_certificate:
+                  type: string
+                  format: binary
+                owner_id:
+                  type: string
+                  format: binary
+                bank_document:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Documents uploaded, pending review
+          content:
+            application/json:
+              examples:
+                uploaded:
+                  value:
+                    message: Documents uploaded successfully. Waiting for admin review.
+                    businessId: 1
+                    status: pending_review
+                    documents:
+                      - id: 10
+                        type: business_license
+                        url: https://res.cloudinary.com/your_cloud/image/upload/v123/...
+                        fileName: business_license.pdf
+                        verified: false
+        '400':
+          description: Missing required documents
+  /vendor/{userId}/status:
+    get:
+      summary: Get vendor registration status
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Status payload
+          content:
+            application/json:
+              examples:
+                pending:
+                  value:
+                    userId: 1
+                    phoneVerified: true
+                    businesses:
+                      - id: 1
+                        ownerId: 1
+                        name: Cafe Test
+                        type: restaurant
+                        streetAddress: 123 Main St
+                        city: Lagos
+                        state: LA
+                        zipCode: 100001
+                        businessPhone: 555-1234
+                        businessEmail: cafe@example.com
+                        websiteUrl: https://cafe.test
+                        description: A test cafe
+                        status: pending_review
+                        rejectionReason: null
+                        documents:
+                          - id: 10
+                            type: business_license
+                            url: https://res.cloudinary.com/your_cloud/image/upload/v123/...
+                            fileName: business_license.pdf
+                            verified: false
+                        bankDetail:
+                          id: 5
+                          bankName: Test Bank
+                          accountName: Cafe Test
+                          accountNumber: '1234567890'
+                          routingNumber: '987654321'
+  /vendor/{businessId}/bank:
+    post:
+      summary: Submit business bank details (path param)
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bankName, accountName, accountNumber]
+              properties:
+                bankName:
+                  type: string
+                accountName:
+                  type: string
+                accountNumber:
+                  type: string
+                routingNumber:
+                  type: string
+      responses:
+        '200':
+          description: Bank details saved
+        '404':
+          description: Business not found
+  /vendor/bank:
+    post:
+      summary: Submit business bank details (body with businessId)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessId, bankName, accountName, accountNumber]
+              properties:
+                businessId:
+                  type: integer
+                bankName:
+                  type: string
+                accountName:
+                  type: string
+                accountNumber:
+                  type: string
+                routingNumber:
+                  type: string
+      responses:
+        '200':
+          description: Bank details saved
+  /admin/businesses/pending:
+    get:
+      summary: List pending businesses for review
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Pending businesses with submitter info
+          content:
+            application/json:
+              examples:
+                list:
+                  value:
+                    success: true
+                    data:
+                      businesses:
+                        - id: 1
+                          name: Cafe Test
+                          status: pending_review
+                          owner:
+                            id: 1
+                            firstName: Test
+                            lastName: User
+                            email: test.vendor@example.com
+                            phone: '5550001001'
+                          documents:
+                            - type: business_license
+                              url: https://res.cloudinary.com/your_cloud/...
+                          bankDetail:
+                            bankName: Test Bank
+                            accountName: Cafe Test
+                            accountNumber: '1234567890'
+  /admin/businesses/{businessId}:
+    get:
+      summary: Get business by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Business detail with submitter info
+  /admin/businesses/{businessId}/approve:
+    post:
+      summary: Approve business
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Business approved
+          content:
+            application/json:
+              examples:
+                approved:
+                  value:
+                    success: true
+                    message: Business approved successfully
+                    data:
+                      business:
+                        id: 1
+                        status: approved
+                        rejectionReason: null
+  /admin/businesses/{businessId}/reject:
+    post:
+      summary: Reject business
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Business rejected
+          content:
+            application/json:
+              examples:
+                rejected:
+                  value:
+                    success: true
+                    message: Business rejected
+                    data:
+                      business:
+                        id: 1
+                        status: rejected
+                        rejectionReason: Missing tax document
+  /admin/businesses/{businessId}/suspend:
+    post:
+      summary: Suspend business
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Business suspended
+  /admin/businesses/approved:
+    get:
+      summary: List approved businesses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Approved businesses list
+  /admin/businesses/rejected:
+    get:
+      summary: List rejected businesses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Rejected businesses list
+  /admin/businesses/suspended:
+    get:
+      summary: List suspended businesses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Suspended businesses list
+  /vendor/{userId}/businesses:
+    get:
+      summary: List vendor businesses by status
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [draft, pending_review, approved, rejected, suspended]
+      responses:
+        '200':
+          description: Vendor businesses
+  /vendor/business/{businessId}:
+    get:
+      summary: Get full business detail for dashboard
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Business detail including documents and bank detail
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Business:
+      type: object
+      properties:
+        id:
+          type: integer
+        ownerId:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+        streetAddress:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        businessPhone:
+          type: string
+        businessEmail:
+          type: string
+        websiteUrl:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [draft, pending_review, approved, rejected, suspended]
+    BusinessDocument:
+      type: object
+      properties:
+        id:
+          type: integer
+        businessId:
+          type: integer
+        type:
+          type: string
+          enum: [tax_id, food_certificate, owner_id, bank_document, business_license]
+        url:
+          type: string
+          description: Cloudinary secure URL of the uploaded document
+        fileName:
+          type: string
+        verified:
+          type: boolean
+    BusinessBankDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        businessId:
+          type: integer
+        bankName:
+          type: string
+        accountName:
+          type: string
+        accountNumber:
+          type: string
+        routingNumber:
+          type: string

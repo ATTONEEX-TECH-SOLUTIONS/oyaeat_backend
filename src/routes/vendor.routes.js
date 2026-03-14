@@ -17,10 +17,10 @@ router.use(authMiddleware);
  * DASHBOARD (restaurant overview)
  * GET /vendor/dashboard
  */
-router.get("/dashboard", vendorController.getVendorDashboard); // we'll add this function
+router.get("/dashboard", vendorController.getVendorDashboard);
 
 // -------------------
-// Existing onboarding routes (keep)
+// Existing onboarding routes
 // -------------------
 
 // Step 3: Upload business details
@@ -53,15 +53,23 @@ router.get("/:userId/businesses", vendorController.getVendorBusinesses);
 router.get("/business/:businessId", vendorController.getBusinessDetail);
 
 // -------------------
-// NEW: MENU CRUD
+// MENU CRUD
 // -------------------
 router.get("/menu", vendorMenuController.getMenu);
-router.post("/menu", vendorMenuController.createMenuItem);
-router.patch("/menu/:itemId", vendorMenuController.updateMenuItem);
+router.post(
+  "/menu",
+  upload.single("image"),
+  vendorMenuController.createMenuItem
+);
+router.patch(
+  "/menu/:itemId",
+  upload.single("image"),
+  vendorMenuController.updateMenuItem
+);
 router.delete("/menu/:itemId", vendorMenuController.deleteMenuItem);
 
 // -------------------
-// NEW: STAFF CRUD
+// STAFF CRUD
 // -------------------
 router.get("/staff", vendorStaffController.getStaff);
 router.post("/staff", vendorStaffController.createStaff);
@@ -69,7 +77,7 @@ router.patch("/staff/:staffId", vendorStaffController.updateStaff);
 router.delete("/staff/:staffId", vendorStaffController.deleteStaff);
 
 // -------------------
-// NEW: ORDERS
+// ORDERS
 // -------------------
 router.get("/orders", vendorOrdersController.getOrders);
 router.patch("/orders/:orderId/status", vendorOrdersController.updateOrderStatus);

@@ -1,85 +1,62 @@
 const express = require("express");
 const router = express.Router();
 
-const vendorController = require("../controllers/vendor.controller");
-const upload = require("../middlewares/upload.middleware");
+const vendorController        = require("../controllers/vendor.controller");
+const vendorMenuController    = require("../controllers/vendor.menu.controller");
+const vendorOrdersController  = require("../controllers/vendor.orders.controller");
+const vendorStaffController   = require("../controllers/vendor.staff.controller");
+const vendorSettingsController = require("../controllers/vendor.settings.controller");
+
+const upload        = require("../middlewares/upload.middleware");
 const authMiddleware = require("../middlewares/auth.middleware");
 
-// NEW controllers
-const vendorMenuController = require("../controllers/vendor.menu.controller");
-const vendorOrdersController = require("../controllers/vendor.orders.controller");
-const vendorStaffController = require("../controllers/vendor.staff.controller");
-
-// ✅ Protect vendor routes (requires Bearer token)
+// ✅ Protect all vendor routes
 router.use(authMiddleware);
 
-/**
- * DASHBOARD (restaurant overview)
- * GET /vendor/dashboard
- */
+// ─── Dashboard ───────────────────────────────────────────────
 router.get("/dashboard", vendorController.getVendorDashboard);
 
-// -------------------
-// Existing onboarding routes
-// -------------------
-
-// Step 3: Upload business details
+// ─── Onboarding ──────────────────────────────────────────────
 router.post("/:userId/business-details", vendorController.uploadBusinessDetails);
 
-// Step 4: Upload verification documents
 router.post(
   "/:businessId/upload-documents",
   upload.fields([
-    { name: "business_license", maxCount: 1 },
-    { name: "tax_id", maxCount: 1 },
-    { name: "food_certificate", maxCount: 1 },
-    { name: "owner_id", maxCount: 1 },
-    { name: "bank_document", maxCount: 1 },
+    { name: "business_license",  maxCount: 1 },
+    { name: "tax_id",            maxCount: 1 },
+    { name: "food_certificate",  maxCount: 1 },
+    { name: "owner_id",          maxCount: 1 },
+    { name: "bank_document",     maxCount: 1 },
   ]),
   vendorController.uploadVerificationDocuments
 );
 
-// Get vendor registration status
-router.get("/:userId/status", vendorController.getVendorStatus);
+router.get( "/:userId/status",     vendorController.getVendorStatus);
+router.post("/:businessId/bank",   vendorController.submitBankDetails);
+router.post("/bank",               vendorController.submitBankDetails);
+router.get( "/:userId/businesses", vendorController.getVendorBusinesses);
+router.get( "/business/:businessId", vendorController.getBusinessDetail);
 
-// Step 5: Submit business bank details
-router.post("/:businessId/bank", vendorController.submitBankDetails);
-router.post("/bank", vendorController.submitBankDetails);
+// ─── Settings ────────────────────────────────────────────────
+router.get(  "/business/:businessId/settings",             vendorSettingsController.getBusinessSettings);
+router.patch("/business/:businessId/settings",             vendorSettingsController.updateBusinessSettings);
+router.post( "/business/:businessId/settings/thumbnail",   upload.single("thumbnail"),  vendorSettingsController.uploadThumbnail);
+router.post( "/business/:businessId/settings/profile-pic", upload.single("profilePic"), vendorSettingsController.uploadProfilePic);
 
-// Vendor businesses by status
-router.get("/:userId/businesses", vendorController.getVendorBusinesses);
+// ─── Menu ────────────────────────────────────────────────────
+router.get(   "/menu",        vendorMenuController.getMenu);
+router.post(  "/menu",        upload.single("image"), vendorMenuController.createMenuItem);
+router.patch( "/menu/:itemId",upload.single("image"), vendorMenuController.updateMenuItem);
+router.delete("/menu/:itemId",vendorMenuController.deleteMenuItem);
 
-// Vendor full business detail
-router.get("/business/:businessId", vendorController.getBusinessDetail);
+// ─── Staff ───────────────────────────────────────────────────
+router.get(   "/staff",           vendorStaffController.getStaff);
+router.post(  "/staff",           vendorStaffController.createStaff);
+router.patch( "/staff/:staffId",  vendorStaffController.updateStaff);
+router.delete("/staff/:staffId",  vendorStaffController.deleteStaff);
 
-// -------------------
-// MENU CRUD
-// -------------------
-router.get("/menu", vendorMenuController.getMenu);
-router.post(
-  "/menu",
-  upload.single("image"),
-  vendorMenuController.createMenuItem
-);
-router.patch(
-  "/menu/:itemId",
-  upload.single("image"),
-  vendorMenuController.updateMenuItem
-);
-router.delete("/menu/:itemId", vendorMenuController.deleteMenuItem);
-
-// -------------------
-// STAFF CRUD
-// -------------------
-router.get("/staff", vendorStaffController.getStaff);
-router.post("/staff", vendorStaffController.createStaff);
-router.patch("/staff/:staffId", vendorStaffController.updateStaff);
-router.delete("/staff/:staffId", vendorStaffController.deleteStaff);
-
-// -------------------
-// ORDERS
-// -------------------
-router.get("/orders", vendorOrdersController.getOrders);
-router.patch("/orders/:orderId/status", vendorOrdersController.updateOrderStatus);
+// ─── Orders ──────────────────────────────────────────────────
+router.get(  "/orders",                    vendorOrdersController.getOrders);
+router.patch("/orders/:orderId/status",    vendorOrdersController.updateOrderStatus);
 
 module.exports = router;

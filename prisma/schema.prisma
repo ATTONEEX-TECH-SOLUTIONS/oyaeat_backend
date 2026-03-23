@@ -53,9 +53,7 @@ model User {
 
   businesses         Business[]
   phoneVerifications PhoneVerification[]
-
-  // ✅ NEW: customer orders
-  orders Order[]
+  orders             Order[]
 }
 
 model PhoneVerification {
@@ -87,9 +85,30 @@ model Business {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  documents  BusinessDocument[]
-  bankDetail BusinessBankDetail?
+  // ── Settings: images ──────────────────────────────────────
+  thumbnailUrl  String?   // restaurant banner / cover photo
+  profilePicUrl String?   // restaurant logo / avatar
 
+  // ── Settings: location extras ────────────────────────────
+  country       String?
+
+  // ── Settings: operating hours ────────────────────────────
+  openingHour   String?   // e.g. "10:00"
+  closingHour   String?   // e.g. "23:00"
+
+  // ── Settings: delivery config ────────────────────────────
+  deliveryRadius  Float?  // in km
+  minimumOrder    Float?  // minimum order value
+  deliveryFee     Float?  // flat delivery fee
+
+  // ── Settings: notification preferences ──────────────────
+  notifNewOrders    Boolean @default(true)
+  notifOrderUpdates Boolean @default(true)
+  notifSystemAlerts Boolean @default(true)
+  notifPromotions   Boolean @default(false)
+
+  documents    BusinessDocument[]
+  bankDetail   BusinessBankDetail?
   menuItems    MenuItem[]
   staffMembers StaffMember[]
   orders       Order[]
@@ -119,87 +138,76 @@ model BusinessBankDetail {
 }
 
 model MenuItem {
-  id         Int      @id @default(autoincrement())
-  businessId Int
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  name        String
-  category    String
-  price       Float
-  description String?
-  imageUrl    String?
-  imagePublicId String?
-  available   Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // ✅ NEW reverse relation
-  orderItems OrderItem[]
+  id              Int      @id @default(autoincrement())
+  businessId      Int
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  category        String
+  price           Float
+  description     String?
+  imageUrl        String?
+  imagePublicId   String?
+  available       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  orderItems      OrderItem[]
 
   @@index([businessId])
 }
-
-
 
 model StaffMember {
   id         Int      @id @default(autoincrement())
   businessId Int
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  fullName String
-  role     String
-  email    String?
-  phone    String?
-  status   String  @default("Active")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  fullName   String
+  role       String
+  email      String?
+  phone      String?
+  status     String   @default("Active")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([businessId])
 }
 
 model Order {
-  id         Int      @id @default(autoincrement())
-  businessId Int
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  // ✅ NEW: connect order to a customer user
-  customerId Int?
-  customer   User? @relation(fields: [customerId], references: [id])
-
+  id            Int         @id @default(autoincrement())
+  businessId    Int
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId    Int?
+  customer      User?       @relation(fields: [customerId], references: [id])
   customerName  String
   customerPhone String?
   address       String?
   paymentMethod String?
   notes         String?
 
-  status OrderStatus @default(pending)
-  total  Float
+ 
+  paymentStatus    String?   // "pending" | "paid" | "failed"
+  paymentReference String?   // Paystack reference
+  paymentChannel   String?   // card, bank_transfer, etc
+  paidAt           DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  items OrderItem[]
+  status        OrderStatus @default(pending)
+  total         Float
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
 
   @@index([businessId])
   @@index([customerId])
 }
 
 model OrderItem {
-  id      Int   @id @default(autoincrement())
-  orderId Int
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  // ✅ NEW: link to menu item ordered
+  id         Int       @id @default(autoincrement())
+  orderId    Int
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   menuItemId Int?
   menuItem   MenuItem? @relation(fields: [menuItemId], references: [id])
-
-  name     String
-  price    Float
-  quantity Int @default(1)
-
-  createdAt DateTime @default(now())
+  name       String
+  price      Float
+  quantity   Int       @default(1)
+  createdAt  DateTime  @default(now())
 
   @@index([orderId])
   @@index([menuItemId])

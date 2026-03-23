@@ -27,15 +27,18 @@ exports.listRestaurants = async (req, res) => {
         skip,
         take: Number(limit),
         select: {
-          id: true,
-          name: true,
-          type: true,
-          city: true,
-          state: true,
+          id:            true,
+          name:          true,
+          type:          true,
+          city:          true,
+          state:         true,
           streetAddress: true,
-          description: true,
-          status: true,
-          createdAt: true,
+          description:   true,
+          status:        true,
+          createdAt:     true,
+          // ── images ──────────────────────
+          thumbnailUrl:  true,
+          profilePicUrl: true,
         },
       }),
       prisma.business.count({ where }),
@@ -63,10 +66,27 @@ exports.getRestaurantMenu = async (req, res) => {
   try {
     const businessId = Number(req.params.businessId);
 
-    // Only approved businesses should be visible publicly
     const business = await prisma.business.findFirst({
       where: { id: businessId, status: "approved" },
-      select: { id: true, name: true },
+      select: {
+        id:             true,
+        name:           true,
+        type:           true,
+        city:           true,
+        state:          true,
+        streetAddress:  true,
+        description:    true,
+        businessPhone:  true,
+        websiteUrl:     true,
+        openingHour:    true,
+        closingHour:    true,
+        deliveryRadius: true,
+        minimumOrder:   true,
+        deliveryFee:    true,
+        // ── images ──────────────────────
+        thumbnailUrl:   true,
+        profilePicUrl:  true,
+      },
     });
 
     if (!business) {
@@ -77,13 +97,13 @@ exports.getRestaurantMenu = async (req, res) => {
       where: { businessId, available: true },
       orderBy: [{ category: "asc" }, { name: "asc" }],
       select: {
-        id: true,
-        name: true,
-        category: true,
-        price: true,
+        id:          true,
+        name:        true,
+        category:    true,
+        price:       true,
         description: true,
-        imageUrl: true,
-        available: true,
+        imageUrl:    true,
+        available:   true,
       },
     });
 

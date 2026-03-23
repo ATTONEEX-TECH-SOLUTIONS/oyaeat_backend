@@ -11,4 +11,7 @@ router.use(requireRole("customer"));
 router.post("/", ordersController.createOrder);
 router.get("/my", ordersController.getMyOrders);
 
+router.post("/initialize-payment", ordersController.initializePayment);
+router.get("/verify-payment/:reference", ordersController.verifyPayment);
+
 module.exports = router;

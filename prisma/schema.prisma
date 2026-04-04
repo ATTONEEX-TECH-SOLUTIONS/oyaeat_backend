@@ -54,6 +54,8 @@ model User {
   businesses         Business[]
   phoneVerifications PhoneVerification[]
   orders             Order[]
+  threads            Thread[]  @relation("ThreadParticipants")
+  sentMessages       Message[] @relation("MessageSender")
 }
 
 model PhoneVerification {
@@ -211,4 +213,31 @@ model OrderItem {
 
   @@index([orderId])
   @@index([menuItemId])
+}
+
+model Thread {
+  id           String    @id @default(uuid())
+  type         String    // 'support_ticket' | 'broadcast'
+  subject      String
+  status       String    @default("open") // 'open' | 'closed'
+  participants User[]    @relation("ThreadParticipants")
+  messages     Message[]
+  lastMessage  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  threadId   String
+  thread     Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId   Int
+  sender     User     @relation("MessageSender", fields: [senderId], references: [id])
+  senderRole String
+  content    String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  
+  @@index([threadId])
+  @@index([senderId])
 }

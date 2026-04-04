@@ -381,4 +381,60 @@ exports.getSuspendedBusinesses = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch suspended businesses', error: error.message });
   }
 };
+
+/**
+ * Get all global orders across all businesses
+ * GET /admin/orders
+ */
+exports.getGlobalOrders = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 200 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const where = {};
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        include: {
+          business: {
+            select: { id: true, name: true }
+          },
+          customer: {
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+          },
+          items: true
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: parseInt(skip),
+        take: parseInt(limit)
+      }),
+      prisma.order.count({ where })
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orders,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get all global orders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch global orders',
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;

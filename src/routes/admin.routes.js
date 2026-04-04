@@ -3,6 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
 const adminMiddleware = require('../middlewares/admin.middleware');
+const broadcastController = require('../controllers/broadcast.controller');
 
 // All admin routes require authentication and admin role
 router.use(authMiddleware);
@@ -33,5 +34,12 @@ router.post('/businesses/:businessId/reject', adminController.rejectBusiness);
 
 // Suspend business
 router.post('/businesses/:businessId/suspend', adminController.suspendBusiness);
+
+// Get all global orders
+// Get all global orders
+router.get('/orders', adminController.getGlobalOrders);
+
+// Send Broadcast
+router.post('/broadcast', broadcastController.sendBroadcast);
 
 module.exports = router;

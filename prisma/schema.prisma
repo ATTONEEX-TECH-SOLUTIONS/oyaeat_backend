@@ -14,6 +14,13 @@ enum Role {
   customer
 }
 
+enum UserStatus {
+  pending
+  verified
+  active
+  inactive
+}
+
 enum BusinessStatus {
   draft
   pending_review
@@ -51,11 +58,18 @@ model User {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  status        UserStatus  @default(pending)
+
   businesses         Business[]
   phoneVerifications PhoneVerification[]
   orders             Order[]
   threads            Thread[]  @relation("ThreadParticipants")
   sentMessages       Message[] @relation("MessageSender")
+  riderProfile       RiderProfile?
+
+  // ── ADD THIS NEW LINE ──────────────────────────────────
+  riderOrders        Order[]           @relation("RiderOrders")
+  shiftLogs          ShiftLog[]        // Links to the new shift tracker below
 }
 
 model PhoneVerification {
@@ -89,8 +103,10 @@ model Business {
 
   // ── Settings: images ──────────────────────────────────────
   thumbnailUrl  String?   // restaurant banner / cover photo
-  profilePicUrl String?   // restaurant logo / avatar
+  profilePicUrl String?  // restaurant logo / avatar
 
+  galleryImages   BusinessImage[]
+  promos       Promo[]
   // ── Settings: location extras ────────────────────────────
   country       String?
 
@@ -157,6 +173,17 @@ model MenuItem {
   @@index([businessId])
 }
 
+
+model BusinessImage {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  imageUrl   String   // The real, non-nullable path to the uploaded file
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
 model StaffMember {
   id         Int      @id @default(autoincrement())
   businessId Int
@@ -196,8 +223,14 @@ model Order {
   updatedAt     DateTime    @updatedAt
   items         OrderItem[]
 
+  // ── ADD THESE NEW FIELDS TO LINK THE RIDER ────────────────
+  riderId       Int?        // Nullable because orders start with no rider
+  rider         User?       @relation("RiderOrders", fields: [riderId], references: [id])
+  payout        Float?      // The delivery fee amount paid out to the rider
+
   @@index([businessId])
   @@index([customerId])
+  @@index([riderId])        // Fast lookups for recent deliveries
 }
 
 model OrderItem {
@@ -241,3 +274,42 @@ model Message {
   @@index([threadId])
   @@index([senderId])
 }
+
+model RiderProfile {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleType   String
+  plateNumber   String?
+  idDocumentUrl String
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ShiftLog {
+  id          Int       @id @default(autoincrement())
+  riderId     Int
+  rider       User      @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  startTime   DateTime  @default(now())
+  endTime     DateTime? // Nullable while they are currently online
+  createdAt   DateTime  @default(now())
+
+  @@index([riderId])
+}
+
+model Promo {
+  id          Int      @id @default(autoincrement())
+  businessId  Int
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  title       String   // e.g. "20% Off Jollof Fiesta"
+  desc        String   // e.g. "Valid until 5PM today"
+  bgGradient  String   @default("from-orange-500 to-red-500") // Tailwind gradient string
+  isActive    Boolean  @default(true)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([businessId])
+}
+
+

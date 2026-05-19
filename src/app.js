@@ -34,11 +34,13 @@ const vendorRoutes = require("./routes/vendor.routes");
 const adminRoutes = require("./routes/admin.routes");
 const adminAuthRoutes = require("./routes/admin.auth.routes");
 
-// ✅ NEW routes
+//  NEW routes
 const publicRoutes = require("./routes/public.routes");
 const ordersRoutes = require("./routes/orders.routes");
 const customerAuthRoutes = require("./routes/customer.auth.routes");
 const adminDashboardRoutes = require("./routes/admin.dashboard.routes");
+const riderAuthRoutes = require("./routes/rider.auth.routes");
+const riderRoutes = require("./routes/rider.routes");
 
 // Mount routes
 app.use("/auth", authRoutes);
@@ -46,11 +48,13 @@ app.use("/vendor", vendorRoutes);
 app.use("/admin/auth", adminAuthRoutes);
 app.use("/admin", adminRoutes);
 
-// ✅ NEW mounts
+//  NEW mounts
 app.use("/public", publicRoutes);
 app.use("/orders", ordersRoutes);
 app.use("/customer/auth", customerAuthRoutes);
 app.use("/admin/dashboard", adminDashboardRoutes);
+app.use("/auth/rider", riderAuthRoutes);
+app.use("/rider", riderRoutes);
 
 app.get('/docs-test', (req, res) => {
   res.json({ ok: true });

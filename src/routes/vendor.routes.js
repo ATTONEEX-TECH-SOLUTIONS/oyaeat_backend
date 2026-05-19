@@ -31,6 +31,14 @@ router.post(
   vendorController.uploadVerificationDocuments
 );
 
+router.post(
+  "/:businessId/upload-gallery", 
+  upload.fields([{ name: "gallery", maxCount: 5 }]),
+  vendorController.uploadGalleryImages
+);
+
+router.delete("/gallery/:imageId", vendorController.deleteGalleryImage);
+
 router.get( "/:userId/status",     vendorController.getVendorStatus);
 router.post("/:businessId/bank",   vendorController.submitBankDetails);
 router.post("/bank",               vendorController.submitBankDetails);

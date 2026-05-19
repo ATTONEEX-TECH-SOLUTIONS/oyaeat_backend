@@ -1,28 +1,22 @@
-const prisma = require("../src/lib/prisma"); // same as your controllers
+const prisma = require("../src/lib/prisma");
 const bcrypt = require("bcrypt");
 
 async function main() {
-  const email = "admin@oya-eat.com";
-  const phone = "+2348000000000"; // must be UNIQUE
-  const password = "Admin@123456"; // change after first login
+  const email = "admin@example.com";
+  const phone = "+2348000000000";
+  const password = "Admin@123456";
 
-  const existing = await prisma.user.findFirst({
-    where: { OR: [{ email }, { phone }] },
+  // Delete old admin completely
+  await prisma.user.deleteMany({
+    where: { email },
   });
 
-  if (existing) {
-    console.log("✅ Admin already exists (or email/phone already used):", {
-      id: existing.id,
-      email: existing.email,
-      phone: existing.phone,
-      role: existing.role,
-    });
-    console.log("If this user is not admin, update its role manually.");
-    return;
-  }
-
+  // Hash fresh password
   const hashed = await bcrypt.hash(password, 10);
 
+  console.log("NEW HASH:", hashed);
+
+  // Create new admin
   const admin = await prisma.user.create({
     data: {
       firstName: "Super",
@@ -30,25 +24,19 @@ async function main() {
       email,
       phone,
       password: hashed,
-      role: "admin", // ✅ this makes it admin
+      role: "admin",
       phoneVerified: true,
     },
   });
 
-  console.log("✅ Admin created:", {
-    id: admin.id,
+  console.log("ADMIN READY:", {
     email: admin.email,
-    phone: admin.phone,
-    role: admin.role,
+    password,
   });
-  console.log("Login with:", { email, password });
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
+  .catch(console.error)
   .finally(async () => {
     await prisma.$disconnect();
   });

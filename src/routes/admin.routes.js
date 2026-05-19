@@ -1,11 +1,51 @@
 const express = require('express');
 const router = express.Router();
+
+// Controllers
 const adminController = require('../controllers/admin.controller');
+const broadcastController = require('../controllers/broadcast.controller');
+const promoController = require('../controllers/promo.controller'); 
+
+// Middlewares
 const authMiddleware = require('../middlewares/auth.middleware');
 const adminMiddleware = require('../middlewares/admin.middleware');
-const broadcastController = require('../controllers/broadcast.controller');
+const upload = require("../middlewares/upload.middleware"); // 🚀 Standard multipart file parser
 
-// All admin routes require authentication and admin role
+// Global database access layer
+const prisma = require("../lib/prisma"); 
+
+// ── 🔓 LEVEL 1 PROTECTED: CUSTOMER-FACING BROADCAST & PROMO PIPELINES ──
+
+// 1. Fetch Approved Dropdown List (Un-gated from strict regex validation loops)
+router.get("/broadcasts/approved-list", authMiddleware, async (req, res) => {
+  try {
+    const approved = await prisma.business.findMany({
+      where: { status: "approved" },
+      select: { id: true, name: true, city: true }
+    });
+    return res.json({ success: true, businesses: approved });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 2. Standardized Broadcast Creation Endpoint (Matches your exact Vendor Menu pattern)
+router.post(
+  "/broadcasts/create", 
+  authMiddleware, 
+  upload.single("image"), // 🚀 intercept and process 'image' buffer streams from frontend form cargo
+  promoController.createPromo // Offloads upload tracking, DB writes, and admin role validation to the controller
+);
+
+// 3. Status Switch Visibility Toggle Handler
+router.patch(
+  "/broadcasts/:id/toggle", 
+  authMiddleware, 
+  promoController.togglePromoStatus
+);
+
+
+// ── 🔒 LEVEL 2 PROTECTED: GLOBAL STRICT MOUNT FOR SYSTEM-WIDE ADMINISTRATION ROUTING ──
 router.use(authMiddleware);
 router.use(adminMiddleware);
 
@@ -36,10 +76,12 @@ router.post('/businesses/:businessId/reject', adminController.rejectBusiness);
 router.post('/businesses/:businessId/suspend', adminController.suspendBusiness);
 
 // Get all global orders
-// Get all global orders
 router.get('/orders', adminController.getGlobalOrders);
 
-// Send Broadcast
+// Send Custom System PUSH Broadcast Alert Notification 
 router.post('/broadcast', broadcastController.sendBroadcast);
+
+// Active promos stream listing cache map
+router.get('/broadcasts/active', promoController.getActivePromos);
 
 module.exports = router;

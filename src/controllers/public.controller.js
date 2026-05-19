@@ -36,9 +36,20 @@ exports.listRestaurants = async (req, res) => {
           description:   true,
           status:        true,
           createdAt:     true,
-          // ── images ──────────────────────
+          minimumOrder:  true, // Loaded to fix minimum display price totals
+          
+          // ── Core Settings Profile Images ──────────────────────
           thumbnailUrl:  true,
           profilePicUrl: true,
+
+          // ── ✅ FIXED: POPULATE SHOWCASE GALLERY PICTURES ARRAY RIGHT HERE ──
+          galleryImages: {
+            select: { 
+              id: true, 
+              imageUrl: true 
+            },
+            take: 3, // Grabs precisely the 3 images needed to form your customer card grid layout
+          },
         },
       }),
       prisma.business.count({ where }),

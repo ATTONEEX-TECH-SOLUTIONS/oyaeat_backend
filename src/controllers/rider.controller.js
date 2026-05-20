@@ -1,7 +1,9 @@
 const prisma = require("../lib/prisma");
 
-
-
+/**
+ * Dashboard View
+ * Route: GET /api/rider/dashboard
+ */
 exports.getDashboard = async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
@@ -44,31 +46,15 @@ exports.getDashboard = async (req, res) => {
     const totalEarningsToday = completedTodayOrders.reduce((sum, order) => sum + (order.payout || 0), 0);
     const countCompletedToday = completedTodayOrders.length;
 
-    // 4. Fetch all shifts starting from today to calculate real hours online
-    const todayShifts = await prisma.shiftLog.findMany({
-      where: {
-        riderId: userId,
-        startTime: { gte: today }
-      }
+    // 4. Fetch the rider's shift state from the database
+    const shift = await prisma.shiftLog.findUnique({
+      where: { userId: userId }
     });
+    
+    const isCurrentlyOnline = shift ? shift.isOnline : false;
 
-    // Check if the rider has an ongoing open shift right now
-    const currentActiveShift = todayShifts.find(shift => shift.endTime === null);
-    const isCurrentlyOnline = !!currentActiveShift;
-
-    // Calculate total duration in milliseconds
-    let totalMsToday = 0;
-    todayShifts.forEach(shift => {
-      const start = new Date(shift.startTime).getTime();
-      const end = shift.endTime ? new Date(shift.endTime).getTime() : Date.now();
-      totalMsToday += (end - start);
-    });
-
-    // Turn total milliseconds into formatted string (e.g., "4h 12m")
-    const totalMinutes = Math.floor(totalMsToday / (1000 * 60));
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    const formattedHoursOnline = `${hours}h ${minutes}m`;
+    // Formatting placeholder for shift logs (Since traditional columns were dropped during migration)
+    const formattedHoursOnline = isCurrentlyOnline ? "Active Shift" : "Offline";
 
     // 5. Get the last 3 completed deliveries for history list
     const recentDeliveriesRaw = await prisma.order.findMany({
@@ -135,28 +121,34 @@ exports.getDashboard = async (req, res) => {
   }
 };
 
-// ... keep your toggleShift and acceptOrder logic matching below unchanged
-
+/**
+ * Shift Actions (Go Online / Go Offline)
+ * Route: POST /api/rider/shift/toggle
+ */
 exports.toggleShift = async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: "Invalid user identity format" });
+    }
 
-    const activeShift = await prisma.shiftLog.findFirst({
-      where: {
-        riderId: userId,
-        endTime: null
-      }
+    const activeShift = await prisma.shiftLog.findUnique({
+      where: { userId: userId }
     });
 
-    if (activeShift) {
+    if (activeShift && activeShift.isOnline) {
+      // Toggle offline
       await prisma.shiftLog.update({
-        where: { id: activeShift.id },
-        data: { endTime: new Date() }
+        where: { userId: userId },
+        data: { isOnline: false }
       });
       return res.json({ status: "offline", message: "Shift ended successfully." });
     } else {
-      await prisma.shiftLog.create({
-        data: { riderId: userId }
+      // Toggle online
+      await prisma.shiftLog.upsert({
+        where: { userId: userId },
+        update: { isOnline: true },
+        create: { userId: userId, isOnline: true }
       });
       return res.json({ status: "online", message: "Shift started successfully." });
     }
@@ -165,16 +157,66 @@ exports.toggleShift = async (req, res) => {
   }
 };
 
+/**
+ * LIVE TELEMETRY UPDATE ENDPOINT
+ * Route: PUT /api/rider/location/ping
+ */
+exports.updateLiveLocation = async (req, res) => {
+  try {
+    const userId = parseInt(req.user.id, 10);
+    const { latitude, longitude } = req.body;
+
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: "Invalid user identity format" });
+    }
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ message: "Missing valid latitude or longitude numeric values." });
+    }
+
+    const updatedLocation = await prisma.shiftLog.upsert({
+      where: { userId: userId },
+      update: {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        isOnline: true // Assume active shift state if coordinates are active
+      },
+      create: {
+        userId: userId,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        isOnline: true
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider geo-coordinates synchronized.",
+      coordinates: { lat: updatedLocation.latitude, lng: updatedLocation.longitude }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to process location ping telemetry", error: error.message });
+  }
+};
+
+/**
+ * Delivery Action (Claim a processing order)
+ * Route: PUT /api/rider/orders/:orderId/accept
+ */
 exports.acceptOrder = async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
     const { orderId } = req.params;
 
-    const activeShift = await prisma.shiftLog.findFirst({
-      where: { riderId: userId, endTime: null }
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: "Invalid user identity format" });
+    }
+
+    const activeShift = await prisma.shiftLog.findUnique({
+      where: { userId: userId }
     });
 
-    if (!activeShift) {
+    if (!activeShift || !activeShift.isOnline) {
       return res.status(400).json({ message: "You must go online before accepting orders." });
     }
 
@@ -204,6 +246,10 @@ exports.acceptOrder = async (req, res) => {
   }
 };
 
+/**
+ * Expose drop-off completion endpoint
+ * Route: PUT /api/rider/orders/:orderId/complete
+ */
 exports.completeDelivery = async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
@@ -213,7 +259,6 @@ exports.completeDelivery = async (req, res) => {
       return res.status(400).json({ message: "Invalid user identity format" });
     }
 
-    // 1. Fetch target order and verify ownership permissions
     const order = await prisma.order.findUnique({
       where: { id: parseInt(orderId, 10) }
     });
@@ -230,12 +275,11 @@ exports.completeDelivery = async (req, res) => {
       return res.status(400).json({ message: "Cannot complete an order that is not out for delivery." });
     }
 
-    // 2. Commit delivery confirmation status modification tracking variables
     const updatedOrder = await prisma.order.update({
       where: { id: order.id },
       data: {
         status: "delivered",
-        updatedAt: new Date() // Automatically captures into today's earnings sum
+        updatedAt: new Date() 
       }
     });
 
@@ -244,7 +288,11 @@ exports.completeDelivery = async (req, res) => {
     res.status(500).json({ message: "Failed to confirm delivery dropoff", error: error.message });
   }
 };
- 
+
+/**
+ * Profile Update (Handles text data & multer profile images)
+ * Route: PUT /api/rider/profile/update
+ */
 exports.updateRiderProfile = async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
@@ -254,61 +302,6 @@ exports.updateRiderProfile = async (req, res) => {
       return res.status(400).json({ message: "Invalid user identity format" });
     }
 
-    // 1. If phone is changed, check if it's already taken by someone else
-    if (phone) {
-      const existingPhone = await prisma.user.findFirst({
-        where: { phone, NOT: { id: userId } }
-      });
-      if (existingPhone) {
-        return res.status(400).json({ message: "Phone number already in use" });
-      }
-    }
-
-    // 2. Perform simultaneous update on User and nested RiderProfile models
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        firstName,
-        lastName,
-        phone,
-        riderProfile: {
-          update: {
-            vehicleType,
-            plateNumber: plateNumber || null
-          }
-        }
-      },
-      include: {
-        riderProfile: true
-      }
-    });
-
-    res.json({
-      message: "Profile updated successfully!",
-      profile: {
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        phone: updatedUser.phone,
-        vehicleType: updatedUser.riderProfile?.vehicleType,
-        plateNumber: updatedUser.riderProfile?.plateNumber,
-        isVerified: updatedUser.riderProfile?.isVerified
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to update profile configurations", error: error.message });
-  }
-};
-
-exports.updateRiderProfile = async (req, res) => {
-  try {
-    const userId = parseInt(req.user.id, 10);
-    const { firstName, lastName, phone, vehicleType, plateNumber } = req.body;
-
-    if (isNaN(userId)) {
-      return res.status(400).json({ message: "Invalid user identity format" });
-    }
-
-    // Prepare updated variables object
     const updateData = {
       firstName,
       lastName,
@@ -321,7 +314,7 @@ exports.updateRiderProfile = async (req, res) => {
       }
     };
 
-    // If a new avatar profile picture is uploaded via multer, save its path
+    // If avatar profile image path is sent from multer middleware
     if (req.file) {
       updateData.avatarUrl = `/uploads/${req.file.filename}`;
     }
@@ -347,7 +340,7 @@ exports.updateRiderProfile = async (req, res) => {
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
         phone: updatedUser.phone,
-        avatarUrl: updatedUser.avatarUrl,
+        avatarUrl: updatedUser.avatarUrl || null,
         vehicleType: updatedUser.riderProfile?.vehicleType,
         plateNumber: updatedUser.riderProfile?.plateNumber,
         isVerified: updatedUser.riderProfile?.isVerified
@@ -358,7 +351,10 @@ exports.updateRiderProfile = async (req, res) => {
   }
 };
 
-
+/**
+ * Admin Action: View all system riders
+ * Route: GET /api/rider/admin/all
+ */
 exports.getAllRiders = async (req, res) => {
   try {
     const riders = await prisma.user.findMany({
@@ -388,11 +384,18 @@ exports.getAllRiders = async (req, res) => {
   }
 };
 
-
+/**
+ * Admin Action: Patch status configurations
+ * Route: PATCH /api/rider/admin/:id/status
+ */
 exports.updateRiderStatus = async (req, res) => {
   try {
     const riderId = parseInt(req.params.id, 10);
     const { status } = req.body;
+
+    if (isNaN(riderId)) {
+      return res.status(400).json({ message: "Invalid rider identity target parameter." });
+    }
 
     if (!["pending", "verified", "active", "inactive"].includes(status)) {
       return res.status(400).json({ message: "Invalid profile state type assignment" });
@@ -417,10 +420,17 @@ exports.updateRiderStatus = async (req, res) => {
   }
 };
 
-
+/**
+ * Admin Action: Reject and drop registration applications
+ * Route: DELETE /api/rider/admin/:id
+ */
 exports.rejectRiderApplication = async (req, res) => {
   try {
     const riderId = parseInt(req.params.id, 10);
+
+    if (isNaN(riderId)) {
+      return res.status(400).json({ message: "Invalid rider identity target parameter." });
+    }
 
     // Cascades and deletes user along with riderProfile due to schema onDelete: Cascade
     await prisma.user.delete({

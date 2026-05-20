@@ -47,29 +47,28 @@ enum OrderStatus {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  firstName     String
-  lastName      String
-  email         String   @unique
-  phone         String   @unique
-  password      String
-  role          Role     @default(owner)
-  phoneVerified Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  status        UserStatus  @default(pending)
-
-  businesses         Business[]
+  id                Int                 @id @default(autoincrement())
+  firstName         String
+  lastName          String
+  email             String              @unique
+  phone             String              @unique
+  password          String
+  role              Role                @default(owner)
+  phoneVerified     Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  status            UserStatus          @default(pending)
+  
+  businesses        Business[]
   phoneVerifications PhoneVerification[]
-  orders             Order[]
-  threads            Thread[]  @relation("ThreadParticipants")
-  sentMessages       Message[] @relation("MessageSender")
-  riderProfile       RiderProfile?
-
-  // ── ADD THIS NEW LINE ──────────────────────────────────
-  riderOrders        Order[]           @relation("RiderOrders")
-  shiftLogs          ShiftLog[]        // Links to the new shift tracker below
+  orders            Order[]
+  threads           Thread[]            @relation("ThreadParticipants")
+  sentMessages      Message[]           @relation("MessageSender")
+  riderProfile      RiderProfile?
+  riderOrders       Order[]             @relation("RiderOrders")
+  
+  // ── TRACKS RIDER SHIFTS & LIVE GPS ──
+  shiftLogs         ShiftLog[]
 }
 
 model PhoneVerification {
@@ -101,35 +100,56 @@ model Business {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  // ── Settings: images ──────────────────────────────────────
-  thumbnailUrl  String?   // restaurant banner / cover photo
-  profilePicUrl String?  // restaurant logo / avatar
+  // Settings: images
+  thumbnailUrl  String?   
+  profilePicUrl String?  
 
   galleryImages   BusinessImage[]
-  promos       Promo[]
-  // ── Settings: location extras ────────────────────────────
-  country       String?
+  promos          Promo[]
+  country         String?
 
-  // ── Settings: operating hours ────────────────────────────
-  openingHour   String?   // e.g. "10:00"
-  closingHour   String?   // e.g. "23:00"
+  // Settings: operating hours
+  openingHour   String?   
+  closingHour   String?   
 
-  // ── Settings: delivery config ────────────────────────────
-  deliveryRadius  Float?  // in km
-  minimumOrder    Float?  // minimum order value
-  deliveryFee     Float?  // flat delivery fee
+  // Settings: delivery config
+  deliveryRadius  Float?  
+  minimumOrder    Float?  
+  deliveryFee     Float?  
 
-  // ── Settings: notification preferences ──────────────────
+  // Settings: notification preferences
   notifNewOrders    Boolean @default(true)
   notifOrderUpdates Boolean @default(true)
   notifSystemAlerts Boolean @default(true)
   notifPromotions   Boolean @default(false)
+
+  // ── NEW: GEOLOCATION FOR PROXIMITY MATCHING ──
+  latitude        Float?
+  longitude       Float?
 
   documents    BusinessDocument[]
   bankDetail   BusinessBankDetail?
   menuItems    MenuItem[]
   staffMembers StaffMember[]
   orders       Order[]
+}
+
+// ── NEW: TRACKS IF RIDER IS ONLINE + CURRENT GPS COORDINATES ──
+model ShiftLog {
+  id         Int       @id @default(autoincrement())
+  
+  // Make userId optional (?) temporarily so existing rows don't break
+  userId     Int?      @unique 
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  isOnline   Boolean   @default(false)
+  latitude   Float?
+  longitude  Float?
+  
+  // Provide a default value for existing rows so PostgreSQL can populate them
+  updatedAt  DateTime  @default(now()) @updatedAt
+
+  @@index([userId])
 }
 
 model BusinessDocument {
@@ -173,12 +193,11 @@ model MenuItem {
   @@index([businessId])
 }
 
-
 model BusinessImage {
   id         Int      @id @default(autoincrement())
   businessId Int
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  imageUrl   String   // The real, non-nullable path to the uploaded file
+  imageUrl   String   
   createdAt  DateTime @default(now())
 
   @@index([businessId])
@@ -200,37 +219,32 @@ model StaffMember {
 }
 
 model Order {
-  id            Int         @id @default(autoincrement())
-  businessId    Int
-  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customerId    Int?
-  customer      User?       @relation(fields: [customerId], references: [id])
-  customerName  String
-  customerPhone String?
-  address       String?
-  paymentMethod String?
-  notes         String?
-
- 
-  paymentStatus    String?   // "pending" | "paid" | "failed"
-  paymentReference String?   // Paystack reference
-  paymentChannel   String?   // card, bank_transfer, etc
+  id               Int         @id @default(autoincrement())
+  businessId       Int
+  business         Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId       Int?
+  customer         User?       @relation(fields: [customerId], references: [id])
+  customerName     String
+  customerPhone    String?
+  address          String?
+  paymentMethod    String?
+  notes            String?
+  paymentStatus    String?   
+  paymentReference String?   
+  paymentChannel   String?   
   paidAt           DateTime?
-
-  status        OrderStatus @default(pending)
-  total         Float
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  items         OrderItem[]
-
-  // ── ADD THESE NEW FIELDS TO LINK THE RIDER ────────────────
-  riderId       Int?        // Nullable because orders start with no rider
-  rider         User?       @relation("RiderOrders", fields: [riderId], references: [id])
-  payout        Float?      // The delivery fee amount paid out to the rider
+  status           OrderStatus @default(pending)
+  total            Float
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  items            OrderItem[]
+  riderId          Int?        
+  rider            User?       @relation("RiderOrders", fields: [riderId], references: [id])
+  payout           Float?      
 
   @@index([businessId])
   @@index([customerId])
-  @@index([riderId])        // Fast lookups for recent deliveries
+  @@index([riderId])        
 }
 
 model OrderItem {
@@ -250,9 +264,9 @@ model OrderItem {
 
 model Thread {
   id           String    @id @default(uuid())
-  type         String    // 'support_ticket' | 'broadcast'
+  type         String    
   subject      String
-  status       String    @default("open") // 'open' | 'closed'
+  status       String    @default("open") 
   participants User[]    @relation("ThreadParticipants")
   messages     Message[]
   lastMessage  String?
@@ -284,32 +298,15 @@ model RiderProfile {
   idDocumentUrl String
   isVerified    Boolean  @default(false)
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
 }
 
-model ShiftLog {
-  id          Int       @id @default(autoincrement())
-  riderId     Int
-  rider       User      @relation(fields: [riderId], references: [id], onDelete: Cascade)
-  startTime   DateTime  @default(now())
-  endTime     DateTime? // Nullable while they are currently online
-  createdAt   DateTime  @default(now())
-
-  @@index([riderId])
-}
-
+// Placeholder for missing reference in your initial schema snippet
 model Promo {
-  id          Int      @id @default(autoincrement())
-  businessId  Int
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  title       String   // e.g. "20% Off Jollof Fiesta"
-  desc        String   // e.g. "Valid until 5PM today"
-  bgGradient  String   @default("from-orange-500 to-red-500") // Tailwind gradient string
-  isActive    Boolean  @default(true)
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
-
-  @@index([businessId])
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  // Make these optional (?) so your 3 existing rows can stay blank/null
+  code       String?
+  discount   Float?
 }
-
-

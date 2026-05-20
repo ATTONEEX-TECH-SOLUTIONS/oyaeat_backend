@@ -15,6 +15,9 @@ const uploadBusinessDetails = async (req, res) => {
       businessEmail,
       websiteUrl,
       description,
+      // ── NEW: EXTRACT FLOATS PUSHED FROM FRONTEND MAP PICKER ──
+      latitude,
+      longitude
     } = req.body;
 
     // Validate required fields
@@ -60,8 +63,13 @@ const uploadBusinessDetails = async (req, res) => {
         websiteUrl: websiteUrl || null,
         description,
         status: "pending_review",
+        // ── NEW: ATTACH AND CAST TO NUMBERS FOR NATIVE SPATIAL QUERIES ──
+        latitude: latitude ? parseFloat(latitude) : null,
+        longitude: longitude ? parseFloat(longitude) : null
       },
     });
+
+    console.log(`🏢 Onboarded New Restaurant: ${business.name} at GPS: [${business.latitude}, ${business.longitude}]`);
 
     res.status(201).json({
       message: "Business details uploaded successfully",
@@ -292,7 +300,6 @@ const getVendorDashboard = async (req, res) => {
       });
     }
 
-    // Safety fallback payload closing off the uncompleted controller code block
     res.json({
       success: true,
       data: {

@@ -41,6 +41,8 @@ const customerAuthRoutes = require("./routes/customer.auth.routes");
 const adminDashboardRoutes = require("./routes/admin.dashboard.routes");
 const riderAuthRoutes = require("./routes/rider.auth.routes");
 const riderRoutes = require("./routes/rider.routes");
+const adminRiderRouter = require("./routes/adminRider.routes");
+
 
 // Mount routes
 app.use("/auth", authRoutes);
@@ -55,6 +57,8 @@ app.use("/customer/auth", customerAuthRoutes);
 app.use("/admin/dashboard", adminDashboardRoutes);
 app.use("/auth/rider", riderAuthRoutes);
 app.use("/rider", riderRoutes);
+app.use("/api/rider/admin", adminRiderRouter);
+
 
 app.get('/docs-test', (req, res) => {
   res.json({ ok: true });

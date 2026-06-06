@@ -35,10 +35,5 @@ router.get("/earnings/summary", earningsController.getRiderEarnings);
 
 router.put("/profile/update", upload.single("avatar"), riderController.updateRiderProfile);
 
-// Note: If these endpoints are accessed by a Superadmin, make sure they aren't 
-// blocked by the global router.use(requireRole("rider")) scope above.
-router.get("/admin/all", riderController.getAllRiders);
-router.patch("/admin/:id/status", riderController.updateRiderStatus);
-router.delete("/admin/:id", riderController.rejectRiderApplication);
 
 module.exports = router;

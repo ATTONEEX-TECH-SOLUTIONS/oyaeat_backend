@@ -402,6 +402,58 @@ const deleteGalleryImage = async (req, res) => {
   }
 };
 
+
+/**
+ * Vendor Action: Submit advertisement draft for admin sanitation
+ * Route: POST /api/vendor/advert/submit
+ */
+const submitVendorAdvert = async (req, res) => {
+  try {
+    const { subject, content, targetRole } = req.body;
+    const ownerId = parseInt(req.user.id, 10); // Extracted from authMiddleware
+
+    if (!content) {
+      return res.status(400).json({ success: false, message: 'Advertisement content is required' });
+    }
+
+    // Verify target selection stays safe
+    const finalTarget = ["rider", "customer", "all"].includes(targetRole) ? targetRole : "all";
+
+    // 1. Create the base broadcast thread flagged as unapproved
+    const thread = await prisma.thread.create({
+      data: {
+        type: 'broadcast',
+        subject: subject || 'Restaurant Advertisement',
+        status: 'pending_review' // Utilizing a tracking flag to indicate admin review state
+      }
+    });
+
+    // 2. Attach the initial draft copy text payload
+    const message = await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        senderId: ownerId,
+        senderRole: 'owner', // Saved as 'owner' to track origin properly
+        content: content,
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Advertisement draft submitted successfully and is currently awaiting administrator review.',
+      data: {
+        threadId: thread.id,
+        subject: thread.subject,
+        targetRole: finalTarget,
+        message
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 module.exports = {
   uploadBusinessDetails,
   uploadVerificationDocuments,
@@ -411,5 +463,6 @@ module.exports = {
   getBusinessDetail,
   getVendorDashboard,
   uploadGalleryImages,
-  deleteGalleryImage
+  deleteGalleryImage,
+  submitVendorAdvert
 };

@@ -47,3 +47,30 @@ exports.sendBroadcast = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// Append this to your controller file
+exports.getPendingVendorAdverts = async (req, res) => {
+  try {
+    // Queries Prisma for any threads still stuck in the review queue
+    const pendingThreads = await prisma.thread.findMany({
+      where: {
+       status: 'pending_review'
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Structure array key matches 'threads' to align directly with your frontend
+    res.status(200).json({
+      success: true,
+      threads: pendingThreads
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch pending vendor requests.', 
+      error: error.message 
+    });
+  }
+};

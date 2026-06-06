@@ -1,4 +1,6 @@
 const prisma = require("../lib/prisma");
+const { sendStatusNotificationEmail } = require("../services/email.service");
+
 
 /**
  * Dashboard View
@@ -93,12 +95,14 @@ exports.getDashboard = async (req, res) => {
       };
     }
 
-    // 7. Build the live final payload with real status tracking variables
+    // ── 7. FIXED: live payload now explicitly includes the user's registry status tracking flags ──
     const dashboardData = {
       isOnline: isCurrentlyOnline, 
+      status: user.status, // Fixed root level check injection
       profile: {
         firstName: user.firstName,
         lastName: user.lastName,
+        status: user.status, // Fixed fallback object mapping for component compatibility
         vehicleType: user.riderProfile?.vehicleType || "Motorcycle"
       },
       stats: {
@@ -388,6 +392,10 @@ exports.getAllRiders = async (req, res) => {
  * Admin Action: Patch status configurations
  * Route: PATCH /api/rider/admin/:id/status
  */
+/**
+ * Admin Action: Patch status configurations
+ * Route: PATCH /api/rider/admin/:id/status
+ */
 exports.updateRiderStatus = async (req, res) => {
   try {
     const riderId = parseInt(req.params.id, 10);
@@ -411,14 +419,28 @@ exports.updateRiderStatus = async (req, res) => {
           }
         }
       },
-      select: { id: true, status: true }
+      // 🚀 FIXED: Added email and firstName fields here so we can read them for the email template
+      select: { 
+        id: true, 
+        status: true,
+        email: true,
+        firstName: true
+      }
     });
+
+    // 🚀 FIRE UNIVERSAL TRANSACTIONAL NOTIFICATION DISPATCH
+    // Using .catch() ensures that if Gmail or the SMTP server runs slowly, it won't lag the admin dashboard interface.
+    if (updatedRider.email) {
+      sendStatusNotificationEmail(updatedRider.email, updatedRider.firstName, status, "rider")
+        .catch(err => console.error("Background runner mail session failure:", err));
+    }
 
     res.json({ message: `Rider profile updated to ${status}`, updatedRider });
   } catch (error) {
     res.status(500).json({ message: "Failed to modify rider status tracking flag", error: error.message });
   }
 };
+
 
 /**
  * Admin Action: Reject and drop registration applications

@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
 const { getIO } = require("../socket/init");
+const paystack = require('paystack-api')(process.env.PAYSTACK_SECRET_KEY); 
 
 // Small helper to validate cart and calculate total securely from DB
 async function validateOrderInput({ businessId, items }) {
@@ -141,7 +142,6 @@ exports.createOrder = async (req, res) => {
 };
 
 // POST /orders/initialize-payment
-// Body: { businessId, customerName, customerPhone?, address?, email, callbackUrl?, notes?, items: [{ menuItemId, quantity }] }
 exports.initializePayment = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -169,6 +169,7 @@ exports.initializePayment = async (req, res) => {
         .json({ success: false, message: "email is required" });
     }
 
+    // Validate incoming order payloads safely
     const { bizId, total, orderItemsCreate } = await validateOrderInput({
       businessId,
       items,
@@ -197,35 +198,34 @@ exports.initializePayment = async (req, res) => {
 
     const reference = `order_${order.id}_${Date.now()}`;
 
-    // ── FIXED LINE: Uses Paystack's official transaction endpoint to prevent 500 errors ──
-    const paystackResponse = await fetch("https://paystack.co", {
-
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
+    // ── FIXED PIPELINE: Native SDK handles Cloudflare headers automatically ──
+    let paystackData;
+    try {
+      const paystackResponse = await paystack.transaction.initialize({
+        email,
+        amount: Math.round(total * 100), // Converted cleanly to kobo matching Paystack configurations
+        reference,
+        currency: "NGN",
+        callback_url: callbackUrl || undefined,
+        channels: ["card", "bank_transfer", "ussd", "bank"],
+        metadata: {
+          orderId: order.id,
+          customerId: userId,
+          businessId: bizId,
+          customerName,
+          customerLatitude: req.body.customerLatitude || null,
+          customerLongitude: req.body.customerLongitude || null
         },
-        body: JSON.stringify({
-          email,
-          amount: Math.round(total * 100), // Converted cleanly to kobo matching Paystack configurations
-          reference,
-          currency: "NGN",
-          callback_url: callbackUrl || undefined,
-          channels: ["card", "bank_transfer", "ussd", "bank"],
-          metadata: {
-            orderId: order.id,
-            customerId: userId,
-            businessId: bizId,
-            customerName,
-            // Pass coordinate parameters quietly through meta tables to track them on webhook answers later
-            customerLatitude: req.body.customerLatitude || null,
-            customerLongitude: req.body.customerLongitude || null
-          },
-        }),
-      }
-    );
+      });
 
-    const paystackData = await paystackResponse.json();
+      paystackData = paystackResponse;
+    } catch (paystackError) {
+      console.error("Paystack SDK communication fault:", paystackError.message);
+      return res.status(400).json({
+        success: false,
+        message: paystackError.message || "Failed to initialize payment transaction window.",
+      });
+    }
 
     if (!paystackData.status) {
       return res.status(400).json({
@@ -234,6 +234,7 @@ exports.initializePayment = async (req, res) => {
       });
     }
 
+    // Save transaction reference string securely
     const updatedOrder = await prisma.order.update({
       where: { id: order.id },
       data: {
@@ -241,6 +242,7 @@ exports.initializePayment = async (req, res) => {
       },
     });
 
+    // Return structured metadata to client application router safely
     return res.json({
       success: true,
       data: {
@@ -269,7 +271,6 @@ exports.initializePayment = async (req, res) => {
       .json({ success: false, message: "Unable to initialize payment pipeline", error: e.message });
   }
 };
-
 
 // GET /orders/verify-payment/:reference
 exports.verifyPayment = async (req, res) => {

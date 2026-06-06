@@ -4,17 +4,18 @@ const router = express.Router();
 // Controllers
 const adminController = require('../controllers/admin.controller');
 const broadcastController = require('../controllers/broadcast.controller');
-const promoController = require('../controllers/promo.controller'); 
+const promoController = require('../controllers/promo.controller');
+const getPendingVendorAdverts = require('../controllers/broadcast.controller'); 
 
 // Middlewares
 const authMiddleware = require('../middlewares/auth.middleware');
 const adminMiddleware = require('../middlewares/admin.middleware');
-const upload = require("../middlewares/upload.middleware"); // 🚀 Standard multipart file parser
+const upload = require("../middlewares/upload.middleware"); 
 
 // Global database access layer
 const prisma = require("../lib/prisma"); 
 
-// ── 🔓 LEVEL 1 PROTECTED: CUSTOMER-FACING BROADCAST & PROMO PIPELINES ──
+// ──  LEVEL 1 PROTECTED: CUSTOMER-FACING BROADCAST & PROMO PIPELINES ──
 
 // 1. Fetch Approved Dropdown List (Un-gated from strict regex validation loops)
 router.get("/broadcasts/approved-list", authMiddleware, async (req, res) => {
@@ -83,5 +84,13 @@ router.post('/broadcast', broadcastController.sendBroadcast);
 
 // Active promos stream listing cache map
 router.get('/broadcasts/active', promoController.getActivePromos);
+
+// 2. Add the GET path underneath your authentication middlewares
+router.get('/broadcasts/pending-adverts', authMiddleware, adminMiddleware, broadcastController.getPendingVendorAdverts);
+router.patch("/advert/:threadId/approve", authMiddleware, adminMiddleware, adminController.sanitizeAndBroadcastAdvert);
+
+
+
+
 
 module.exports = router;

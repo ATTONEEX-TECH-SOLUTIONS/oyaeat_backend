@@ -306,7 +306,14 @@ model Promo {
   businessId Int
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   
-  // Make these optional (?) so your 3 existing rows can stay blank/null
+  // Existing coupon fields (kept safe)
   code       String?
   discount   Float?
+
+  // 💡 NEW ADDITIONS: Optional banner campaign fields
+  title      String?
+  desc       String?
+  bgGradient String?
+  expiresAt  DateTime?
+  isActive   Boolean?   @default(true)
 }

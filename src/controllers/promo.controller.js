@@ -1,5 +1,4 @@
 const prisma = require("../lib/prisma");
-
 const cloudinary = require('cloudinary').v2; 
 
 /**
@@ -89,14 +88,30 @@ exports.createPromo = async (req, res) => {
 /**
  * Active Visibility Status Switch Toggle Endpoint
  */
+/**
+ * Active Visibility Status Switch Toggle Endpoint using ExpiresAt fallbacks
+ */
 exports.togglePromoStatus = async (req, res) => {
   try {
-    const promoId = parseInt(req.params.id);
-    const { isActive } = req.body;
+    const promoId = parseInt(req.params.id, 10);
+    const { isActive } = req.body; // Sent from frontend click button
+
+    let updatedExpirationDate;
+
+    if (isActive) {
+      // If turning ON: Set expiration to 24 hours in the future
+      updatedExpirationDate = new Date();
+      updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
+    } else {
+      // If turning OFF (Deactivating): Set expiration to right now (instantly expired)
+      updatedExpirationDate = new Date();
+    }
 
     const updatedPromo = await prisma.promo.update({
       where: { id: promoId },
-      data: { isActive: !!isActive }
+      data: { 
+        expiresAt: updatedExpirationDate // 💡 Updates expiration timestamp instead of missing isActive flag
+      }
     });
 
     return res.json({ success: true, data: updatedPromo });
@@ -105,13 +120,16 @@ exports.togglePromoStatus = async (req, res) => {
   }
 };
 
+
 /**
  * Super Admin Panel Active List Table Loader Hook
  */
 exports.getActivePromos = async (req, res) => {
   try {
     const promos = await prisma.promo.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: { 
+        id: 'desc' // 💡 Fixed: Sorts by auto-incrementing ID to fallback safely without a createdAt column
+      },
       include: {
         business: { select: { name: true } }
       }
@@ -131,7 +149,6 @@ exports.getPublicPromoFeed = async (req, res) => {
     const now = new Date();
 
     const activeBanners = await prisma.promo.findMany({
-      //  CRITICAL FIX: Explicitly add constraints to filter out hidden campaigns
       where: {
         isActive: true,        // ONLY load rows where status is explicitly true
         expiresAt: { gt: now } // ONLY load rows where expiration hasn't passed
@@ -146,7 +163,7 @@ exports.getPublicPromoFeed = async (req, res) => {
         }
       },
       orderBy: {
-        createdAt: 'desc' // Display newest active campaigns first
+        id: 'desc' // 💡 Fixed: Swapped missing createdAt key with valid ID descending indexing order
       }
     });
 

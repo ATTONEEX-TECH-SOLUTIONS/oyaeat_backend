@@ -7,8 +7,11 @@ const vendorOrdersController  = require("../controllers/vendor.orders.controller
 const vendorStaffController   = require("../controllers/vendor.staff.controller");
 const vendorSettingsController = require("../controllers/vendor.settings.controller");
 
+const vendorAdvertController = require("../controllers/vendor.controller");
+
 const upload        = require("../middlewares/upload.middleware");
 const authMiddleware = require("../middlewares/auth.middleware");
+const requireRole = require("../middlewares/role.middleware")
 
 // ✅ Protect all vendor routes
 router.use(authMiddleware);
@@ -66,5 +69,8 @@ router.delete("/staff/:staffId",  vendorStaffController.deleteStaff);
 // ─── Orders ──────────────────────────────────────────────────
 router.get(  "/orders",                    vendorOrdersController.getOrders);
 router.patch("/orders/:orderId/status",    vendorOrdersController.updateOrderStatus);
+
+
+router.post("/advert/submit", authMiddleware, requireRole("owner"), vendorAdvertController.submitVendorAdvert);
 
 module.exports = router;

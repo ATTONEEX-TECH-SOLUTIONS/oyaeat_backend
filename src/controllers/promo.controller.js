@@ -1,34 +1,41 @@
 const prisma = require("../lib/prisma");
-const cloudinary = require('cloudinary').v2; 
+const cloudinary = require("cloudinary").v2;
 
-/**
- * Creates a brand new image-based advertisement broadcast campaign banner.
- * Matches your exact vendor menu item pattern.
- */
-exports.createPromo = async (req, res) => {
+exports.createPromoVendorRequest = async (req, res) => {
   try {
-    // 1. Double check case-insensitive Admin permissions role level layer
-    const userRole = (req.user?.role || "").toLowerCase();
-    if (userRole !== "admin") {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Access denied. Valid admin role privileges required." 
+    if (!req.user || !req.user.id) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Unauthorized. Session context missing.",
+        });
+    }
+
+    const vendorBusiness = await prisma.business.findFirst({
+      where: { ownerId: req.user.id },
+    });
+
+    if (!vendorBusiness) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "No registered business found matching your vendor profile account parameters.",
       });
     }
 
-    // 2. Enforce physical multipart file chunk attachment rules
     if (!req.file) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please select a broadcast banner image file to upload." 
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Please select a campaign graphic file to upload.",
+        });
     }
 
     let uploadedImageUrl = "";
 
-    // 3. Robust Stream/Path parsing handler supporting both Memory and Disk storage configurations
     if (req.file.buffer) {
-      // Setup A: If upload.middleware uses memoryStorage()
       const uploadStream = () => {
         return new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
@@ -36,103 +43,112 @@ exports.createPromo = async (req, res) => {
             (error, result) => {
               if (result) resolve(result.secure_url);
               else reject(error);
-            }
+            },
           );
           stream.end(req.file.buffer);
         });
       };
       uploadedImageUrl = await uploadStream();
     } else if (req.file.path) {
-      // Setup B: If upload.middleware uses diskStorage() and caches files locally first
       const result = await cloudinary.uploader.upload(req.file.path, {
-        folder: "oyaeat/broadcasts"
+        folder: "oyaeat/broadcasts",
       });
       uploadedImageUrl = result.secure_url;
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Unable to extract binary file payload stream. Check middleware configuration."
-      });
     }
 
-    // 4. Transform string hours request metrics into valid upcoming JS Date timestamps
     const duration = parseInt(req.body.durationHours) || 24;
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + duration);
 
-    // 5. Create database row structure mapping strings into integers safely
     const newPromo = await prisma.promo.create({
       data: {
-        businessId: parseInt(req.body.businessId),
+        businessId: vendorBusiness.id,
         title: req.body.title,
         desc: req.body.desc,
-        bgGradient: uploadedImageUrl, // 🚀 Secure remote cloud URL string goes here
+        bgGradient: uploadedImageUrl,
         expiresAt: expiresAt,
-        isActive: true
+        isActive: false,
+        code: req.body.code ? req.body.code : null,
+        discount: req.body.discount ? parseFloat(req.body.discount) : null,
       },
       include: {
-        business: {
-          select: { name: true }
-        }
-      }
+        business: { select: { name: true } },
+      },
     });
 
-    return res.status(201).json({ success: true, data: newPromo });
-
+    return res.status(201).json({
+      success: true,
+      message:
+        "Campaign sent to administration teams for live review approval.",
+      data: newPromo,
+    });
   } catch (error) {
-    console.error("Promo Controller Creation Crash:", error.message || error);
-    return res.status(500).json({ success: false, message: error.message || "Internal transmission failure." });
+    console.error("Vendor Promo Engine Crash:", error);
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Internal server transmission failure.",
+      });
   }
 };
 
-/**
- * Active Visibility Status Switch Toggle Endpoint
- */
-/**
- * Active Visibility Status Switch Toggle Endpoint using ExpiresAt fallbacks
- */
-exports.togglePromoStatus = async (req, res) => {
+exports.getMyActivePromos = async (req, res) => {
   try {
-    const promoId = parseInt(req.params.id, 10);
-    const { isActive } = req.body; // Sent from frontend click button
-
-    let updatedExpirationDate;
-
-    if (isActive) {
-      // If turning ON: Set expiration to 24 hours in the future
-      updatedExpirationDate = new Date();
-      updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
-    } else {
-      // If turning OFF (Deactivating): Set expiration to right now (instantly expired)
-      updatedExpirationDate = new Date();
+    if (!req.user || !req.user.id) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Unauthorized profile state credentials.",
+        });
     }
 
-    const updatedPromo = await prisma.promo.update({
-      where: { id: promoId },
-      data: { 
-        expiresAt: updatedExpirationDate // 💡 Updates expiration timestamp instead of missing isActive flag
-      }
+    const vendorBusiness = await prisma.business.findFirst({
+      where: { ownerId: req.user.id },
     });
 
-    return res.json({ success: true, data: updatedPromo });
+    if (!vendorBusiness) {
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "Associated vendor venue record parameters not found.",
+        });
+    }
+
+    const promos = await prisma.promo.findMany({
+      where: { businessId: vendorBusiness.id },
+      orderBy: { id: "desc" },
+      include: {
+        business: { select: { name: true } },
+      },
+    });
+
+    return res.json({ success: true, data: promos });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 
-/**
- * Super Admin Panel Active List Table Loader Hook
- */
+
+
+
+
+
+
+
+
+
+
 exports.getActivePromos = async (req, res) => {
   try {
     const promos = await prisma.promo.findMany({
-      orderBy: { 
-        id: 'desc' // 💡 Fixed: Sorts by auto-incrementing ID to fallback safely without a createdAt column
-      },
+      orderBy: { id: "desc" },
       include: {
-        business: { select: { name: true } }
-      }
+        business: { select: { name: true } },
+      },
     });
     return res.json({ success: true, data: promos });
   } catch (error) {
@@ -140,36 +156,225 @@ exports.getActivePromos = async (req, res) => {
   }
 };
 
-/**
- * Public Customer Application Banner Stream Feed Controller
- * Excludes manually disabled assets and expired campaigns automatically.
- */
 exports.getPublicPromoFeed = async (req, res) => {
   try {
     const now = new Date();
-
     const activeBanners = await prisma.promo.findMany({
       where: {
-        isActive: true,        // ONLY load rows where status is explicitly true
-        expiresAt: { gt: now } // ONLY load rows where expiration hasn't passed
+        isActive: true,
+        expiresAt: { gt: now },
       },
       include: {
         business: {
-          select: {
-            id: true,
-            name: true,
-            thumbnailUrl: true
-          }
-        }
+          select: { id: true, name: true, thumbnailUrl: true },
+        },
       },
-      orderBy: {
-        id: 'desc' // 💡 Fixed: Swapped missing createdAt key with valid ID descending indexing order
+      orderBy: { id: "desc" },
+    });
+    return res.json({ success: true, data: activeBanners });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed loading carousel feed." });
+  }
+};
+
+
+
+
+
+exports.getPendingVendorPromos = async (req, res) => {
+  try {
+    const pendingPromos = await prisma.promo.findMany({
+      where: { 
+        isActive: false,
+        expiresAt: { gt: new Date() } // 🚀 ONLY future expirations (not rejected)
+      },
+      orderBy: { id: "desc" },
+      include: { business: { select: { name: true, city: true } } }
+    });
+    return res.json({ success: true, data: pendingPromos });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+exports.getRejectedVendorPromosHistory = async (req, res) => {
+  try {
+    const rejections = await prisma.promo.findMany({
+      where: { 
+        isActive: false,
+        expiresAt: { lt: new Date("2020-01-01") } // 🚀 Catches our historical rejection marker date
+      },
+      orderBy: { id: "desc" },
+      include: { business: { select: { name: true } } }
+    });
+    return res.json({ success: true, data: rejections });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+exports.deletePromoBannerInstance = async (req, res) => {
+  try {
+    const promoId = parseInt(req.params.id, 10);
+
+    if (isNaN(promoId)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid parameters. A valid numerical promo ID is required." 
+      });
+    }
+
+    // 1. Fetch the target promo from your database first to retrieve its image URL path
+    const targetPromo = await prisma.promo.findUnique({
+      where: { id: promoId }
+    });
+
+    if (!targetPromo) {
+      return res.status(404).json({ success: false, message: "Advertisement campaign record not found." });
+    }
+
+    // 2. Clear out the image asset from Cloudinary storage buckets if it exists
+    if (targetPromo.bgGradient && targetPromo.bgGradient.includes("cloudinary.com")) {
+      try {
+        // Splitting segments isolates everything after the root cloud version markers
+        const urlParts = targetPromo.bgGradient.split('/');
+        const uploadIndex = urlParts.findIndex(part => part.startsWith('v') && !isNaN(part.slice(1)));
+        
+        if (uploadIndex !== -1) {
+          // Extracts ['oyaeat', 'broadcasts', 'p6iqu2222watn1vx4rjo.png']
+          const pathSegments = urlParts.slice(uploadIndex + 1);
+          // Combines into 'oyaeat/broadcasts/p6iqu2222watn1vx4rjo' while removing the file extension extension
+          const publicIdWithExtension = pathSegments.join('/');
+          const publicId = publicIdWithExtension.substring(0, publicIdWithExtension.lastIndexOf('.'));
+
+          // Dispatches remote unlinking execution sequence block
+          await cloudinary.uploader.destroy(publicId);
+          console.log(`Cloudinary asset destroyed successfully: ${publicId}`);
+        }
+      } catch (cloudErr) {
+        // Non-blocking catch keeps your DB record clean even if Cloudinary file was already deleted manually
+        console.error("Failed to destroy associated Cloudinary asset file:", cloudErr);
+      }
+    }
+
+    // 3. Hard delete row from database completely
+    await prisma.promo.delete({
+      where: { id: promoId }
+    });
+
+    return res.json({ 
+      success: true, 
+      message: "Advertisement campaign and associated image file permanently purged from system records." 
+    });
+  } catch (error) {
+    console.error("Delete Controller Error:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || "Could not execute database data purge routine." 
+    });
+  }
+};
+
+
+
+/**
+ * 👑 ADMIN CONTROLLER: Approve a vendor's ad banner campaign
+ */
+exports.approveVendorPromo = async (req, res) => {
+  try {
+    const promoId = parseInt(req.params.id, 10);
+    const updatedExpirationDate = new Date();
+    updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
+
+    const approvedPromo = await prisma.promo.update({
+      where: { id: promoId },
+      data: {
+        isActive: true,
+        expiresAt: updatedExpirationDate
       }
     });
 
-    return res.json({ success: true, data: activeBanners });
+    // 🚀 INJECT NOTIFICATION: Tell the vendor their ad went live
+    await prisma.notification.create({
+      data: {
+        businessId: approvedPromo.businessId,
+        title: "📢 Campaign Approved Live!",
+        text: `Your advertisement campaign "${approvedPromo.title}" has been approved by admin and is now broadcasting live to customers.`
+      }
+    });
+
+    return res.json({ success: true, message: "Vendor campaign approved live!", data: approvedPromo });
   } catch (error) {
-    console.error("Public Promo Feed Runtime Catch:", error.message);
-    return res.status(500).json({ success: false, message: "Failed loading active campaigns carousel feed." });
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * 👑 ADMIN CONTROLLER: Reject/Take down a vendor's campaign request
+ */
+exports.rejectVendorPromo = async (req, res) => {
+  try {
+    const promoId = parseInt(req.params.id, 10);
+
+    const rejectedPromo = await prisma.promo.update({
+      where: { id: promoId },
+      data: {
+        isActive: false, 
+        expiresAt: new Date("2016-01-01") 
+      }
+    });
+
+    // 🚀 INJECT NOTIFICATION: Tell the vendor their ad was rejected
+    await prisma.notification.create({
+      data: {
+        businessId: rejectedPromo.businessId,
+        title: "❌ Campaign Request Rejected",
+        text: `Your advertisement submission "${rejectedPromo.title}" did not pass administrative review and was rejected.`
+      }
+    });
+
+    return res.json({ success: true, message: "Vendor request rejected and archived.", data: rejectedPromo });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * 👑 ADMIN CONTROLLER: Active Visibility Status Switch Toggle Endpoint (Hide/Unhide)
+ */
+exports.togglePromoStatus = async (req, res) => {
+  try {
+    const promoId = parseInt(req.params.id, 10);
+    const { isActive } = req.body;
+
+    let updatedExpirationDate = new Date();
+    if (isActive) updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
+
+    const updatedPromo = await prisma.promo.update({
+      where: { id: promoId },
+      data: { 
+        isActive: isActive,
+        expiresAt: updatedExpirationDate 
+      }
+    });
+
+    // 🚀 INJECT NOTIFICATION: Notify vendor that visibility changed
+    await prisma.notification.create({
+      data: {
+        businessId: updatedPromo.businessId,
+        title: isActive ? "👀 Campaign Visibility Restored" : "🙈 Campaign Hidden by Admin",
+        text: isActive 
+          ? `Your campaign banner "${updatedPromo.title}" has been reactivated on streams.`
+          : `Your campaign banner "${updatedPromo.title}" was hidden from public feeds by system operators.`
+      }
+    });
+
+    return res.json({ success: true, data: updatedPromo });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -42,6 +42,8 @@ const adminDashboardRoutes = require("./routes/admin.dashboard.routes");
 const riderAuthRoutes = require("./routes/rider.auth.routes");
 const riderRoutes = require("./routes/rider.routes");
 const adminRiderRouter = require("./routes/adminRider.routes");
+const chatRoutes = require("./routes/chat.routes");
+
 
 
 // Mount routes
@@ -52,6 +54,9 @@ app.use("/admin", adminRoutes);
 
 //  NEW mounts
 app.use("/public", publicRoutes);
+
+app.use("/chat", chatRoutes);
+
 app.use("/orders", ordersRoutes);
 app.use("/customer/auth", customerAuthRoutes);
 app.use("/admin/dashboard", adminDashboardRoutes);

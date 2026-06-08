@@ -1,124 +1,144 @@
-const prisma = require('../lib/prisma');
-const { getIo } = require('../socket/init');
+const prisma = require("../lib/prisma");
 
-// Get user's threads
-exports.getThreads = async (req, res) => {
+
+exports.createSupportThread = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const threads = await prisma.thread.findMany({
-      where: {
+    const { subject, type } = req.body;
+    if (!subject?.trim()) {
+      return res.status(400).json({ success: false, message: "A subject heading is required." });
+    }
+
+    const newThread = await prisma.thread.create({
+      data: {
+        subject: subject.trim(),
+        type: type || "support",
+        status: "open",
+        lastMessage: "New thread opened.",
         participants: {
-          some: { id: userId }
+          // 🚀 Connects the user and captures both their specific ID and Role context
+          connect: { id: req.user.id } 
         }
       },
       include: {
         participants: {
           select: { id: true, firstName: true, lastName: true, role: true }
         }
-      },
-      orderBy: { updatedAt: 'desc' }
+      }
     });
-
-    res.status(200).json({ success: true, data: threads });
+    return res.status(201).json({ success: true, data: newThread });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Create Support Thread
-exports.createSupportThread = async (req, res) => {
+
+
+/**
+ * 📢 FETCH ALL CONVERSATIONS / THREADS LIST
+ * 🔐 FIXED: Enforces strict user ID and user role matching criteria to prevent cross-account leaks
+ */
+exports.getThreads = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { subject, recipientRole } = req.body;
+    const userRole = req.user.role.toLowerCase();
+    let queryConditions = {};
 
-    // Default target is admin
-    const targetUser = await prisma.user.findFirst({
-      where: { role: 'admin' }
-    });
-
-    if (!targetUser) {
-      return res.status(404).json({ success: false, message: 'No admin found to receive support ticket' });
-    }
-
-    const thread = await prisma.thread.create({
-      data: {
-        type: 'support_ticket',
-        subject: subject,
+    // 1. SuperAdmins can see everything system-wide
+    // 2. Customers, Vendors, and Riders only see threads where their unique ID AND Role match perfectly
+    if (userRole !== "admin") {
+      queryConditions = {
         participants: {
-          connect: [{ id: userId }, { id: targetUser.id }]
+          some: {
+            id: req.user.id,
+            role: req.user.role // 🚀 CRITICAL FIX: Verifies role to isolate accounts sharing the same ID numbers
+          }
         }
-      },
-      include: { participants: { select: { id: true, role: true } } }
-    });
-
-    try {
-      getIo().to('role_admin').emit('new_thread', thread);
-    } catch (err) {
-      console.error('Socket error emitting new_thread:', err);
+      };
     }
 
-    res.status(201).json({ success: true, data: thread });
+    const threads = await prisma.thread.findMany({
+      where: queryConditions,
+      orderBy: { updatedAt: "desc" },
+      include: {
+        participants: {
+          select: { id: true, firstName: true, lastName: true, role: true }
+        }
+      }
+    });
+
+    return res.json({ success: true, data: threads });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Get Messages
+
+
+
 exports.getMessages = async (req, res) => {
   try {
     const { threadId } = req.params;
+
     const messages = await prisma.message.findMany({
       where: { threadId },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: "asc" },
+      include: {
+        sender: {
+          select: { id: true, firstName: true, lastName: true, role: true }
+        },
+        thread: {
+          include: {
+            participants: {
+              select: { id: true, firstName: true, lastName: true, role: true }
+            }
+          }
+        }
+      }
     });
 
-    res.status(200).json({ success: true, data: messages });
+    // Mark incoming messages as read
+    await prisma.message.updateMany({
+      where: {
+        threadId,
+        senderId: { not: req.user.id },
+        isRead: false
+      },
+      data: { isRead: true }
+    });
+
+    return res.json({ success: true, data: messages });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Send Message
+
+
 exports.sendMessage = async (req, res) => {
   try {
     const { threadId } = req.params;
     const { content } = req.body;
-    const userId = req.user.id;
-    const role = req.user.role;
 
-    const thread = await prisma.thread.findFirst({
-      where: {
-        id: threadId,
-        participants: { some: { id: userId } }
-      }
-    });
-
-    if (!thread) {
-      return res.status(404).json({ success: false, message: 'Thread not found or unauthorized' });
+    if (!content?.trim()) {
+      return res.status(400).json({ success: false, message: "Message content cannot be blank." });
     }
 
-    const message = await prisma.message.create({
+    const newMessage = await prisma.message.create({
       data: {
-        threadId,
-        senderId: userId,
-        senderRole: role,
-        content
+        content: content.trim(),
+        senderRole: req.user.role,
+        isRead: false,
+        thread: { connect: { id: threadId } },
+        sender: { connect: { id: req.user.id } } 
       }
     });
 
     await prisma.thread.update({
       where: { id: threadId },
-      data: { lastMessage: content, updatedAt: new Date() }
+      data: { lastMessage: content.trim() }
     });
 
-    try {
-      getIo().to(`thread_${threadId}`).emit('receive_message', message);
-    } catch (err) {
-      console.error('Socket error emitting receive_message:', err);
-    }
-
-    res.status(201).json({ success: true, data: message });
+    return res.status(201).json({ success: true, data: newMessage });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

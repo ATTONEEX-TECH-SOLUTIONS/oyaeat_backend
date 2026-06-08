@@ -79,6 +79,7 @@ model PhoneVerification {
   expiresAt DateTime
   verified  Boolean  @default(false)
   createdAt DateTime @default(now())
+  
 }
 
 model Business {
@@ -132,6 +133,9 @@ model Business {
   menuItems    MenuItem[]
   staffMembers StaffMember[]
   orders       Order[]
+
+
+  notifications Notification[] 
 }
 
 // ── NEW: TRACKS IF RIDER IS ONLINE + CURRENT GPS COORDINATES ──
@@ -300,6 +304,16 @@ model RiderProfile {
   createdAt     DateTime @default(now())
 }
 
+model RiderAlert {
+  id        Int      @id @default(autoincrement())
+  riderId   Int      // Maps back to your Rider/User ID field
+  title     String
+  desc      String
+  type      String   @default("success") // 'success' | 'warning'
+  createdAt DateTime @default(now())
+}
+
+
 // Placeholder for missing reference in your initial schema snippet
 model Promo {
   id         Int      @id @default(autoincrement())
@@ -317,3 +331,14 @@ model Promo {
   expiresAt  DateTime?
   isActive   Boolean?   @default(true)
 }
+
+model Notification {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  title      String
+  text       String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+

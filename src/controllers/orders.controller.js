@@ -78,6 +78,23 @@ async function validateOrderInput({ businessId, items }) {
 // Body: { businessId, customerName, customerPhone?, address?, paymentMethod?, notes?, items: [{ menuItemId, quantity }] }
 exports.createOrder = async (req, res) => {
   try {
+    // ── 🌟 FIXED: KEY ALIGNED WITH PRISMA STUDIO EXACTLY ──
+    const maintenanceSetting = await prisma.systemSetting.findUnique({
+      where: { key: "core.maintenanceMode" } // ◄ Updated from core.maintenanceMode to match Row 4 of your DB!
+    });
+
+    // Safe validation block that strips away uppercase or whitespace bugs
+    if (maintenanceSetting) {
+      const isMaintenanceActive = maintenanceSetting.value.trim().toLowerCase() === "true";
+
+      if (isMaintenanceActive) {
+        return res.status(503).json({
+          success: false,
+          message: "OyaEat is currently undergoing system updates. Placing new orders is temporarily disabled. Please try again shortly!"
+        });
+      }
+    }
+
     const userId = req.user?.id;
 
     const {
@@ -140,6 +157,7 @@ exports.createOrder = async (req, res) => {
       .json({ success: false, message: "Failed to create order", error: e.message });
   }
 };
+
 
 // POST /orders/initialize-payment
 exports.initializePayment = async (req, res) => {

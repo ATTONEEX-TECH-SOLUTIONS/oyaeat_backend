@@ -96,13 +96,20 @@ exports.getDashboard = async (req, res) => {
     }
 
     // ── 7. FIXED: live payload now explicitly includes the user's registry status tracking flags ──
+        // ── 7. FIXED WITH ACCOUNT ACCESS LOGIC FOR VERIFIED RIDERS ──
     const dashboardData = {
       isOnline: isCurrentlyOnline, 
-      status: user.status, // Fixed root level check injection
+      
+      //  FIX 1: Updates root status so the frontend opens permissions
+      status: (user.status === "verified" || user.status === "active") ? "active" : user.status, 
+      
       profile: {
         firstName: user.firstName,
         lastName: user.lastName,
-        status: user.status, // Fixed fallback object mapping for component compatibility
+        
+        // FIX 2: Updates nested profile status for UI component compatibility
+        status: (user.status === "verified" || user.status === "active") ? "active" : user.status, 
+        
         vehicleType: user.riderProfile?.vehicleType || "Motorcycle"
       },
       stats: {
@@ -118,6 +125,7 @@ exports.getDashboard = async (req, res) => {
         time: o.updatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }))
     };
+
 
     res.json(dashboardData);
   } catch (error) {

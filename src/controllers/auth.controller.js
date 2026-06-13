@@ -67,7 +67,8 @@ exports.registerVendor = async (req, res) => {
   }
 };
 
-// Step 2: Verify phone number with hardcoded OTP
+
+
 exports.verifyPhoneNumber = async (req, res) => {
   try {
     const { userId, otp } = req.body;
@@ -111,15 +112,26 @@ exports.verifyPhoneNumber = async (req, res) => {
       data: { phoneVerified: true },
     });
 
+    // 1. Generate the JWT token right after successful verification
+    const token = jwt.sign(
+      { id: user.id, role: user.role, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    // 2. Return the token in the response payload
     res.json({
       message: "Phone number verified successfully",
       userId: user.id,
+      token: token, // 🌟 Frontend will now securely catch and save this!
       nextStep: "Upload business details",
     });
   } catch (error) {
     res.status(500).json({ message: "Verification failed", error: error.message });
   }
 };
+
+
 
 // Login: email + password, returns JWT and vendor dashboard summary
 exports.login = async (req, res) => {

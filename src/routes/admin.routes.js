@@ -5,6 +5,7 @@ const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const broadcastController = require('../controllers/broadcast.controller');
 const promoController = require('../controllers/promo.controller');
+const settingsController = require("../controllers/settings.controller");
 
 // Middlewares
 const authMiddleware = require('../middlewares/auth.middleware');
@@ -84,5 +85,8 @@ router.post('/broadcast', broadcastController.sendBroadcast);
 router.get('/broadcasts/rejected-history', promoController.getRejectedVendorPromosHistory);
 router.delete("/broadcasts/:id", promoController.deletePromoBannerInstance);
 
+
+router.get("/settings", authMiddleware, settingsController.getSystemSettings);
+router.patch("/settings", authMiddleware, settingsController.updateSystemSettings);
 
 module.exports = router;

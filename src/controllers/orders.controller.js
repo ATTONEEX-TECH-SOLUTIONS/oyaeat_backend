@@ -1,4 +1,6 @@
 const prisma = require("../lib/prisma");
+const { getIO } = require("../socket/init");
+const paystack = require('paystack-api')(process.env.PAYSTACK_SECRET_KEY); 
 
 // Small helper to validate cart and calculate total securely from DB
 async function validateOrderInput({ businessId, items }) {
@@ -76,6 +78,23 @@ async function validateOrderInput({ businessId, items }) {
 // Body: { businessId, customerName, customerPhone?, address?, paymentMethod?, notes?, items: [{ menuItemId, quantity }] }
 exports.createOrder = async (req, res) => {
   try {
+    // ── 🌟 FIXED: KEY ALIGNED WITH PRISMA STUDIO EXACTLY ──
+    const maintenanceSetting = await prisma.systemSetting.findUnique({
+      where: { key: "core.maintenanceMode" } // ◄ Updated from core.maintenanceMode to match Row 4 of your DB!
+    });
+
+    // Safe validation block that strips away uppercase or whitespace bugs
+    if (maintenanceSetting) {
+      const isMaintenanceActive = maintenanceSetting.value.trim().toLowerCase() === "true";
+
+      if (isMaintenanceActive) {
+        return res.status(503).json({
+          success: false,
+          message: "OyaEat is currently undergoing system updates. Placing new orders is temporarily disabled. Please try again shortly!"
+        });
+      }
+    }
+
     const userId = req.user?.id;
 
     const {
@@ -139,8 +158,8 @@ exports.createOrder = async (req, res) => {
   }
 };
 
+
 // POST /orders/initialize-payment
-// Body: { businessId, customerName, customerPhone?, address?, email, callbackUrl?, notes?, items: [{ menuItemId, quantity }] }
 exports.initializePayment = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -168,11 +187,13 @@ exports.initializePayment = async (req, res) => {
         .json({ success: false, message: "email is required" });
     }
 
+    // Validate incoming order payloads safely
     const { bizId, total, orderItemsCreate } = await validateOrderInput({
       businessId,
       items,
     });
 
+    // Save baseline metadata details into your original Order schema rows safely
     const order = await prisma.order.create({
       data: {
         businessId: bizId,
@@ -195,40 +216,43 @@ exports.initializePayment = async (req, res) => {
 
     const reference = `order_${order.id}_${Date.now()}`;
 
-    const paystackResponse = await fetch(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json",
+    // ── FIXED PIPELINE: Native SDK handles Cloudflare headers automatically ──
+    let paystackData;
+    try {
+      const paystackResponse = await paystack.transaction.initialize({
+        email,
+        amount: Math.round(total * 100), // Converted cleanly to kobo matching Paystack configurations
+        reference,
+        currency: "NGN",
+        callback_url: callbackUrl || undefined,
+        channels: ["card", "bank_transfer", "ussd", "bank"],
+        metadata: {
+          orderId: order.id,
+          customerId: userId,
+          businessId: bizId,
+          customerName,
+          customerLatitude: req.body.customerLatitude || null,
+          customerLongitude: req.body.customerLongitude || null
         },
-        body: JSON.stringify({
-          email,
-          amount: Math.round(total * 100),
-          reference,
-          currency: "NGN",
-          callback_url: callbackUrl || undefined,
-          channels: ["card", "bank_transfer", "ussd", "bank"],
-          metadata: {
-            orderId: order.id,
-            customerId: userId,
-            businessId: bizId,
-            customerName,
-          },
-        }),
-      }
-    );
+      });
 
-    const paystackData = await paystackResponse.json();
+      paystackData = paystackResponse;
+    } catch (paystackError) {
+      console.error("Paystack SDK communication fault:", paystackError.message);
+      return res.status(400).json({
+        success: false,
+        message: paystackError.message || "Failed to initialize payment transaction window.",
+      });
+    }
 
     if (!paystackData.status) {
       return res.status(400).json({
         success: false,
-        message: paystackData.message || "Failed to initialize payment",
+        message: paystackData.message || "Failed to initialize payment transaction window.",
       });
     }
 
+    // Save transaction reference string securely
     const updatedOrder = await prisma.order.update({
       where: { id: order.id },
       data: {
@@ -236,6 +260,7 @@ exports.initializePayment = async (req, res) => {
       },
     });
 
+    // Return structured metadata to client application router safely
     return res.json({
       success: true,
       data: {
@@ -246,6 +271,7 @@ exports.initializePayment = async (req, res) => {
       },
     });
   } catch (e) {
+    console.error("Critical payment breakdown exception:", e.message);
     const message = e.message || "Unable to initialize payment";
 
     if (
@@ -260,7 +286,7 @@ exports.initializePayment = async (req, res) => {
 
     return res
       .status(500)
-      .json({ success: false, message: "Unable to initialize payment", error: e.message });
+      .json({ success: false, message: "Unable to initialize payment pipeline", error: e.message });
   }
 };
 
@@ -354,7 +380,13 @@ exports.getMyOrders = async (req, res) => {
     const orders = await prisma.order.findMany({
       where: { customerId: userId },
       include: {
-        items: true,
+        items: {
+          include: {
+            menuItem: {
+              select: { imageUrl: true, imagePublicId: true }
+            }
+          }
+        },
         business: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -363,5 +395,141 @@ exports.getMyOrders = async (req, res) => {
     res.json({ success: true, data: { orders } });
   } catch (e) {
     res.status(500).json({ success: false, message: "Failed to fetch orders", error: e.message });
+  }
+};
+
+// ── NEW PROXIMITY DISPATCH ENGINE HELPER ──
+// Runs a spherical radius circle lookup centering the targeted restaurant ID
+async function findNearbyAvailableRiders(businessId, radiusInKm = 5.0) {
+  const restaurant = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { latitude: true, longitude: true }
+  });
+
+  if (!restaurant || !restaurant.latitude || !restaurant.longitude) {
+    return []; // Gracefully fail if target restaurant lacks coordinate maps
+  }
+
+  const { latitude: restLat, longitude: restLng } = restaurant;
+
+  // 6371 represents planet Earth's radius in kilometers
+  const nearbyRiders = await prisma.$queryRaw`
+    SELECT 
+      sl."userId" as "riderId",
+      u."firstName",
+      u."lastName",
+      u."phone",
+      sl.latitude,
+      sl.longitude,
+      (6371 * acos(
+        cos(radians(${restLat})) * cos(radians(sl.latitude)) * 
+        cos(radians(sl.longitude) - radians(${restLng})) + 
+        sin(radians(${restLat})) * sin(radians(sl.latitude))
+      )) AS distance
+    FROM "ShiftLog" sl
+    JOIN "User" u ON sl."userId" = u.id
+    WHERE u.role = 'rider' 
+      AND sl."isOnline" = true
+      AND sl.latitude IS NOT NULL 
+      AND sl.longitude IS NOT NULL
+      AND (6371 * acos(
+        cos(radians(${restLat})) * cos(radians(sl.latitude)) * 
+        cos(radians(sl.longitude) - radians(${restLng})) + 
+        sin(radians(${restLat})) * sin(radians(sl.latitude))
+      )) <= ${radiusInKm}
+    ORDER BY distance ASC;
+  `;
+
+  return nearbyRiders;
+}
+
+// ── NEW PROXIMITY DISPATCH ROUTE ACTION ──
+// POST /orders/:id/dispatch
+exports.dispatchOrderToRiders = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { business: { select: { name: true } } } // Pull restaurant name for alert toast
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order record not found" });
+    }
+
+    // Identify nearby riders located inside a 5km operational ring
+    const eligibleRiders = await findNearbyAvailableRiders(order.businessId, 5.0);
+
+    // ── NEW LIVE SOCKET BROADCAST LOOPS ──
+    const ioInstance = getIO();
+
+    eligibleRiders.forEach((rider) => {
+      console.log(`🎯 Dispatching live push to Rider #${rider.riderId} (${rider.firstName})`);
+      
+      // Target rider's private room instantly
+      ioInstance.to(`rider_${rider.riderId}`).emit("NEW_DELIVERY_REQUEST", {
+        orderId: order.id,
+        restaurantName: order.business?.name || "Partner Kitchen",
+        payout: order.payout || 1200,
+        distance: `${rider.distance.toFixed(1)} km`,
+        dropoffAddress: order.address || "Customer Doorstep"
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Proximity scanning radius check successfully processed and pushed via socket.",
+      notifiedRidersCount: eligibleRiders.length,
+      data: { riders: eligibleRiders }
+    });
+
+  } catch (error) {
+    console.error("Critical logistics matching query failure:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal proximity distribution module failure", 
+      error: error.message 
+    });
+  }
+};
+
+exports.getCustomerRiderTracking = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        status: true,
+        riderId: true,
+        rider: {
+          select: {
+            firstName: true,
+            lastName: true,
+            shiftLogs: {
+              select: { latitude: true, longitude: true, isOnline: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!order || !order.riderId || !order.rider.shiftLogs[0]) {
+      return res.status(200).json({ message: "No active rider assigned yet or tracking is offline." });
+    }
+
+    const shiftData = order.rider.shiftLogs[0];
+
+    return res.status(200).json({
+      riderName: `${order.rider.firstName} ${order.rider.lastName}`,
+      latitude: shiftData.latitude,
+      longitude: shiftData.longitude,
+      status: order.status
+    });
+
+  } catch (error) {
+    console.error("Customer position tracker query error:", error);
+    return res.status(500).json({ message: "Failed to pull rider tracking updates", error: error.message });
   }
 };

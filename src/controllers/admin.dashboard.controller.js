@@ -60,3 +60,58 @@ exports.getDashboardMetrics = async (req, res) => {
     });
   }
 };
+
+
+
+/**
+ * Controller Action: Fetches all currently online riders for the map telemetry monitor
+ * Route: GET /api/admin-dashboard/live-riders
+ */
+exports.getLiveRidersTelemetry = async (req, res) => {
+  try {
+    const activeRiders = await prisma.shiftLog.findMany({
+      where: {
+        isOnline: true,
+        latitude: { not: null },
+        longitude: { not: null },
+        user: { role: "rider" } // Explicit check that role type is a rider
+      },
+      select: {
+        userId: true,
+        latitude: true,
+        longitude: true,
+        updatedAt: true,
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            phone: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    // Flatten data properties cleanly for the frontend mapping keys
+    const formattedFleetData = activeRiders.map((log) => ({
+      riderId: log.userId,
+      latitude: log.latitude,
+      longitude: log.longitude,
+      firstName: log.user.firstName,
+      lastName: log.user.lastName,
+      phone: log.user.phone,
+      email: log.user.email,
+      lastSeen: log.updatedAt
+    }));
+
+    return res.status(200).json(formattedFleetData);
+
+  } catch (error) {
+    console.error("Live map fleet query breakdown:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Failed to collect live fleet mapping coordinates", 
+      error: error.message 
+    });
+  }
+};

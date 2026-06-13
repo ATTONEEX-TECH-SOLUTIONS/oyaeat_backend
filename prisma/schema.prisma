@@ -14,6 +14,13 @@ enum Role {
   customer
 }
 
+enum UserStatus {
+  pending
+  verified
+  active
+  inactive
+}
+
 enum BusinessStatus {
   draft
   pending_review
@@ -40,20 +47,30 @@ enum OrderStatus {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
+  id            Int        @id @default(autoincrement())
   firstName     String
   lastName      String
-  email         String   @unique
-  phone         String   @unique
+  email         String     @unique
+  phone         String     @unique
   password      String
-  role          Role     @default(owner)
-  phoneVerified Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  role          Role       @default(owner)
+  phoneVerified Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  status        UserStatus @default(pending)
 
   businesses         Business[]
   phoneVerifications PhoneVerification[]
   orders             Order[]
+  threads            Thread[]            @relation("ThreadParticipants")
+  sentMessages       Message[]           @relation("MessageSender")
+  riderProfile       RiderProfile?
+  riderOrders        Order[]             @relation("RiderOrders")
+
+  // ── TRACKS RIDER SHIFTS & LIVE GPS ──
+  shiftLogs ShiftLog[]
+
+  wallet Wallet?
 }
 
 model PhoneVerification {
@@ -85,33 +102,58 @@ model Business {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  // ── Settings: images ──────────────────────────────────────
-  thumbnailUrl  String?   // restaurant banner / cover photo
-  profilePicUrl String?   // restaurant logo / avatar
+  // Settings: images
+  thumbnailUrl  String?
+  profilePicUrl String?
 
-  // ── Settings: location extras ────────────────────────────
+  galleryImages BusinessImage[]
+  promos        Promo[]
   country       String?
 
-  // ── Settings: operating hours ────────────────────────────
-  openingHour   String?   // e.g. "10:00"
-  closingHour   String?   // e.g. "23:00"
+  // Settings: operating hours
+  openingHour String?
+  closingHour String?
 
-  // ── Settings: delivery config ────────────────────────────
-  deliveryRadius  Float?  // in km
-  minimumOrder    Float?  // minimum order value
-  deliveryFee     Float?  // flat delivery fee
+  // Settings: delivery config
+  deliveryRadius Float?
+  minimumOrder   Float?
+  deliveryFee    Float?
 
-  // ── Settings: notification preferences ──────────────────
+  // Settings: notification preferences
   notifNewOrders    Boolean @default(true)
   notifOrderUpdates Boolean @default(true)
   notifSystemAlerts Boolean @default(true)
   notifPromotions   Boolean @default(false)
+
+  // ── NEW: GEOLOCATION FOR PROXIMITY MATCHING ──
+  latitude  Float?
+  longitude Float?
 
   documents    BusinessDocument[]
   bankDetail   BusinessBankDetail?
   menuItems    MenuItem[]
   staffMembers StaffMember[]
   orders       Order[]
+
+  notifications Notification[]
+}
+
+// ── NEW: TRACKS IF RIDER IS ONLINE + CURRENT GPS COORDINATES ──
+model ShiftLog {
+  id Int @id @default(autoincrement())
+
+  // Make userId optional (?) temporarily so existing rows don't break
+  userId Int?  @unique
+  user   User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  isOnline  Boolean @default(false)
+  latitude  Float?
+  longitude Float?
+
+  // Provide a default value for existing rows so PostgreSQL can populate them
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([userId])
 }
 
 model BusinessDocument {
@@ -138,19 +180,29 @@ model BusinessBankDetail {
 }
 
 model MenuItem {
-  id              Int      @id @default(autoincrement())
-  businessId      Int
-  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name            String
-  category        String
-  price           Float
-  description     String?
-  imageUrl        String?
-  imagePublicId   String?
-  available       Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  orderItems      OrderItem[]
+  id            Int         @id @default(autoincrement())
+  businessId    Int
+  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name          String
+  category      String
+  price         Float
+  description   String?
+  imageUrl      String?
+  imagePublicId String?
+  available     Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  orderItems    OrderItem[]
+
+  @@index([businessId])
+}
+
+model BusinessImage {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  imageUrl   String
+  createdAt  DateTime @default(now())
 
   @@index([businessId])
 }
@@ -171,31 +223,34 @@ model StaffMember {
 }
 
 model Order {
-  id            Int         @id @default(autoincrement())
-  businessId    Int
-  business      Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customerId    Int?
-  customer      User?       @relation(fields: [customerId], references: [id])
-  customerName  String
-  customerPhone String?
-  address       String?
-  paymentMethod String?
-  notes         String?
-
- 
-  paymentStatus    String?   // "pending" | "paid" | "failed"
-  paymentReference String?   // Paystack reference
-  paymentChannel   String?   // card, bank_transfer, etc
+  id               Int         @id @default(autoincrement())
+  businessId       Int
+  business         Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId       Int?
+  customer         User?       @relation(fields: [customerId], references: [id])
+  customerName     String
+  customerPhone    String?
+  address          String?
+  paymentMethod    String?
+  notes            String?
+  paymentStatus    String?
+  paymentReference String?
+  paymentChannel   String?
   paidAt           DateTime?
+  status           OrderStatus @default(pending)
+  total            Float
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  items            OrderItem[]
+  riderId          Int?
+  rider            User?       @relation("RiderOrders", fields: [riderId], references: [id])
+  payout           Float?
 
-  status        OrderStatus @default(pending)
-  total         Float
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  items         OrderItem[]
+  walletTransactions WalletTransaction[]
 
   @@index([businessId])
   @@index([customerId])
+  @@index([riderId])
 }
 
 model OrderItem {
@@ -211,4 +266,124 @@ model OrderItem {
 
   @@index([orderId])
   @@index([menuItemId])
+}
+
+model Thread {
+  id           String    @id @default(uuid())
+  type         String
+  subject      String
+  status       String    @default("open")
+  participants User[]    @relation("ThreadParticipants")
+  messages     Message[]
+  lastMessage  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  threadId   String
+  thread     Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId   Int
+  sender     User     @relation("MessageSender", fields: [senderId], references: [id])
+  senderRole String
+  content    String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([threadId])
+  @@index([senderId])
+}
+
+model RiderProfile {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleType   String
+  plateNumber   String?
+  idDocumentUrl String
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  // ── 🌟 ADDED BY MANUAL EMAIL LINKER TERMINAL ──
+  bankName      String?
+  accountName   String?
+  accountNumber String? @db.VarChar(10)
+}
+
+model RiderAlert {
+  id        Int      @id @default(autoincrement())
+  riderId   Int
+  title     String
+  desc      String
+  type      String   @default("success") // 'success' | 'warning'
+  createdAt DateTime @default(now())
+}
+
+model Promo {
+  id         Int       @id @default(autoincrement())
+  businessId Int
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code       String?
+  discount   Float?
+  title      String?
+  desc       String?
+  bgGradient String?
+  expiresAt  DateTime?
+  isActive   Boolean?  @default(true)
+}
+
+model Notification {
+  id         Int      @id @default(autoincrement())
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  title      String
+  text       String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model SystemSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique // e.g., "fees.adminCommissionPercentage"
+  value     String
+  category  String // e.g., "fees"
+  updatedAt DateTime @updatedAt
+}
+
+// ── 🌟 PLATFORM AUTOMATED WALLET TRANSACTION ENGINE ──
+
+model Wallet {
+  id             Int                 @id @default(autoincrement())
+  userId         Int?                @unique
+  user           User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance        Float               @default(0.0)
+  pendingPayouts Float               @default(0.0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  transactions   WalletTransaction[]
+}
+
+model WalletTransaction {
+  id          String            @id @default(uuid())
+  walletId    Int
+  wallet      Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount      Float
+  type        TransactionType
+  status      TransactionStatus @default(pending)
+  description String
+  orderId     Int?
+  order       Order?            @relation(fields: [orderId], references: [id])
+  createdAt   DateTime          @default(now())
+}
+
+enum TransactionType {
+  credit // Earnings incoming from order splits
+  debit // Withdrawals out to registered bank account
+}
+
+enum TransactionStatus {
+  pending
+  completed
+  failed
 }

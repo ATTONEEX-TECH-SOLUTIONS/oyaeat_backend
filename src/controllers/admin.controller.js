@@ -1,4 +1,5 @@
-const prisma = require('../lib/prisma');
+const prisma = require('../lib/prisma')
+const { getIo } = require('../socket/init');
 
 /**
  * Get all businesses pending review
@@ -381,4 +382,144 @@ exports.getSuspendedBusinesses = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch suspended businesses', error: error.message });
   }
 };
+
+/**
+ * Get all global orders across all businesses
+ * GET /admin/orders
+ */
+exports.getGlobalOrders = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 200 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const where = {};
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        include: {
+          business: {
+            select: { id: true, name: true }
+          },
+          customer: {
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+          },
+          items: true
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: parseInt(skip),
+        take: parseInt(limit)
+      }),
+      prisma.order.count({ where })
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orders,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get all global orders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch global orders',
+      error: error.message
+    });
+  }
+};
+
+
+
+
+
+/**
+ * Admin Action: Review, sanitize (edit), and broadcast vendor advertisement live
+ * Route: PATCH /api/rider/admin/advert/:threadId/approve
+ */
+exports.sanitizeAndBroadcastAdvert = async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    // Admin has full permission to rewrite/sanitize the subject, content, or target role if needed
+    const { sanitizedSubject, sanitizedContent, targetRole } = req.body;
+    const adminId = parseInt(req.user.id, 10);
+
+    if (!sanitizedContent) {
+      return res.status(400).json({ success: false, message: 'Sanitized broadcast content is required' });
+    }
+
+    // 1. Verify the thread exists before running updates
+    const existingThread = await prisma.thread.findUnique({
+      where: { id: threadId }
+    });
+
+    if (!existingThread) {
+      return res.status(404).json({ success: false, message: 'Advertisement thread not found.' });
+    }
+
+    // 2. Update thread state to open and commit sanitized subject modifications
+    const updatedThread = await prisma.thread.update({
+      where: { id: threadId },
+      data: {
+        status: 'open', // Flip status flag to open now that it's verified live
+        subject: sanitizedSubject || existingThread.subject
+      }
+    });
+
+    // 3. Create a clean message row representing the finalized approved copy
+    const approvedMessage = await prisma.message.create({
+      data: {
+        threadId: updatedThread.id,
+        senderId: adminId,
+        senderRole: 'admin', // Signed off by admin
+        content: sanitizedContent,
+      }
+    });
+
+    const payload = {
+      threadId: updatedThread.id,
+      subject: updatedThread.subject,
+      message: approvedMessage,
+    };
+
+    // 4. Safe WebSocket execution flow wrapper to prevent runtime crashes
+    try {
+      // Tries to pull from app injection first, falls back to function check if imported
+      const io = req.app.get('io') || (typeof getIo === 'function' ? getIo() : null);
+      
+      if (io) {
+        if (targetRole && targetRole !== 'all') {
+          io.to(`role_${targetRole}`).emit('broadcast', payload);
+        } else {
+          io.emit('broadcast', payload);
+        }
+        console.log("Live real-time broadcast socket payload dispatched cleanly.");
+      } else {
+        console.warn("Socket.io engine not initialized. Broadcast data committed to DB only.");
+      }
+    } catch (socketError) {
+      console.error("Socket emit failed gracefully, continuing response:", socketError.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Advertisement sanitized, approved, and broadcasted live successfully.',
+      data: payload
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+
 module.exports = exports;

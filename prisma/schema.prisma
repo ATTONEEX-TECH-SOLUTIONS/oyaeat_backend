@@ -125,6 +125,10 @@ model Business {
   notifSystemAlerts Boolean @default(true)
   notifPromotions   Boolean @default(false)
 
+  // 🚀 ADD THESE TWO FIELDS HERE FOR INSTANT STATUS INDICATOR SYNCING
+  hasDocuments      Boolean @default(false)
+  hasBankDetails    Boolean @default(false)
+
   // ── NEW: GEOLOCATION FOR PROXIMITY MATCHING ──
   latitude  Float?
   longitude Float?

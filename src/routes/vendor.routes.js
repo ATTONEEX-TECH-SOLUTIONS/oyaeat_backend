@@ -26,23 +26,32 @@ router.get("/dashboard", vendorController.getVendorDashboard);
 // ─── Onboarding ──────────────────────────────────────────────
 router.post("/:userId/business-details", vendorController.uploadBusinessDetails);
 
+
+
+// 1. Define the exact fields matching your frontend parameters
+const complianceFields = upload.fields([
+  { name: "business_license", maxCount: 1 },
+  { name: "tax_id",            maxCount: 1 },
+  { name: "food_certificate",  maxCount: 1 },
+  { name: "owner_id",          maxCount: 1 },
+  { name: "bank_document",     maxCount: 1 }
+]);
+
+// 2. 🌟 REPLACE your existing /:businessId/upload-documents route configuration with this:
 router.post(
   "/:businessId/upload-documents",
-  upload.fields([
-    { name: "business_license",  maxCount: 1 },
-    { name: "tax_id",            maxCount: 1 },
-    { name: "food_certificate",  maxCount: 1 },
-    { name: "owner_id",          maxCount: 1 },
-    { name: "bank_document",     maxCount: 1 },
-  ]),
+  complianceFields, // 👈 Replaced upload.any() with named fields mapping
   vendorController.uploadVerificationDocuments
 );
+
 
 router.post(
   "/:businessId/upload-gallery", 
   upload.fields([{ name: "gallery", maxCount: 5 }]),
   vendorController.uploadGalleryImages
 );
+router.get('/status', vendorController.getVendorStatus); // ✅ Fixed
+
 
 router.delete("/gallery/:imageId", vendorController.deleteGalleryImage);
 

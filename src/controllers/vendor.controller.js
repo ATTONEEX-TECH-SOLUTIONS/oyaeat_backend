@@ -83,90 +83,146 @@ const uploadBusinessDetails = async (req, res) => {
   }
 };
 
-// Step 4: Upload verification documents
+
 const uploadVerificationDocuments = async (req, res) => {
   try {
     const { businessId } = req.params;
+    const parsedBusinessId = parseInt(businessId, 10);
 
-    if (!req.files || Object.keys(req.files).length === 0) {
-      return res.status(400).json({ message: "No files uploaded" });
-    }
-    console.log("req.files keys:", Object.keys(req.files || {}));
-
-    const business = await prisma.business.findUnique({
-      where: { id: parseInt(businessId) },
+    // 1. Fetch pre-existing documents already saved for this business in the DB
+    const existingDocs = await prisma.businessDocument.findMany({
+      where: { businessId: parsedBusinessId }
     });
-
-    if (!business) {
-      return res.status(404).json({ message: "Business not found" });
-    }
 
     const requiredDocuments = [
       { fieldName: "business_license", type: "business_license" },
-      { fieldName: "tax_id", type: "tax_id" },
-      { fieldName: "food_certificate", type: "food_certificate" },
-      { fieldName: "owner_id", type: "owner_id" },
-      { fieldName: "bank_document", type: "bank_document" },
+      { fieldName: "tax_id",            type: "tax_id" },
+      { fieldName: "food_certificate",  type: "food_certificate" },
+      { fieldName: "owner_id",          type: "owner_id" },
+      { fieldName: "bank_document",     type: "bank_document" },
     ];
 
+    // 2.  SMART VALIDATION: Check if files are fresh OR historical DB targets
+    const missingFields = [];
+
     for (const doc of requiredDocuments) {
-      if (!req.files[doc.fieldName]) {
-        return res
-          .status(400)
-          .json({ message: `Missing required document: ${doc.fieldName}` });
+      const isUploadedFresh = req.files && 
+                              req.files[doc.fieldName] && 
+                              Array.isArray(req.files[doc.fieldName]) && 
+                              req.files[doc.fieldName].length > 0;
+      
+      const existsInDatabase = existingDocs && existingDocs.some(d => d.type === doc.type);
+
+      // A document is valid if it exists fresh in payload OR already exists in DB
+      if (!isUploadedFresh && !existsInDatabase) {
+        missingFields.push(doc.fieldName);
       }
     }
 
-    const cloudinary = require("../lib/cloudinary");
-    for (const doc of requiredDocuments) {
-      const file = req.files[doc.fieldName][0];
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        message: `Missing required document: ${missingFields.join(", ")}. Please ensure all compliance fields are complete.` 
+      });
+    }
 
+    // 3. Process only the newly uploaded files to Cloudinary
+    const cloudinary = require("../lib/cloudinary");
+    
+    for (const doc of requiredDocuments) {
+      const isUploadedFresh = req.files && 
+                              req.files[doc.fieldName] && 
+                              Array.isArray(req.files[doc.fieldName]) && 
+                              req.files[doc.fieldName].length > 0;
+                              
+      if (!isUploadedFresh) continue;
+
+      // 🌟 FIX HERE: Add [0] at the end to pull the exact file object from the Multer field array!
+      const file = req.files[doc.fieldName][0]; 
+
+      // 🧹 CLOUDINARY STORAGE PURGE: Locate old file version and destroy it from the cloud
+      const oldDocRecord = existingDocs.find(d => d.type === doc.type);
+      if (oldDocRecord && oldDocRecord.url) {
+        try {
+          const urlParts = oldDocRecord.url.split('/');
+          const folderIdx = urlParts.indexOf('oyaeat');
+          if (folderIdx !== -1) {
+            const publicIdWithExt = urlParts.slice(folderIdx).join('/');
+            const publicId = publicIdWithExt.substring(0, publicIdWithExt.lastIndexOf('.'));
+            await cloudinary.uploader.destroy(publicId);
+            console.log(`🗑️ Purged old Cloudinary asset for type: ${doc.type}`);
+          }
+        } catch (cloudErr) {
+          console.error(`⚠️ Non-blocking asset purge bypass:`, cloudErr.message);
+        }
+      }
+
+      // Upload the replacement / new file copy
       const uploadResult = await cloudinary.uploader.upload(file.path, {
         folder: `oyaeat/business_documents/${businessId}`,
         use_filename: true,
-        unique_filename: false,
+        unique_filename: true, 
         resource_type: 'image',
         access_mode: "public",
         type: "upload",
       });
       
+      // rest of your prisma code...
+
+      
+      // Upsert tracking layer: Safely wipe old database row definition
+      await prisma.businessDocument.deleteMany({
+        where: {
+          businessId: parsedBusinessId,
+          type: doc.type
+        }
+      });
+
+      // Write fresh document row configuration
       await prisma.businessDocument.create({
         data: {
-          businessId: parseInt(businessId),
+          businessId: parsedBusinessId,
           type: doc.type,
           url: uploadResult.secure_url,
           fileName: file.originalname,
-          verified: false,
+          verified: false, // Reset individual check flag for the admin panel review
         },
       });
     }
 
+    // 4. 🧼 STATUS SYSTEM RESET: Force business status back to "pending_review" and wipe rejections
     const updatedBusiness = await prisma.business.update({
-      where: { id: parseInt(businessId) },
-      data: { status: "pending_review" },
+      where: { id: parsedBusinessId },
+      data: { 
+        status: "pending_review",
+        rejectionReason: null 
+      },
     });
 
     res.json({
-      message: "Documents uploaded successfully. Waiting for admin review.",
+      message: "Documents updated successfully. Re-submitting application for review.",
       businessId: updatedBusiness.id,
       status: updatedBusiness.status,
       documents: await prisma.businessDocument.findMany({
-        where: { businessId: parseInt(businessId) },
+        where: { businessId: parsedBusinessId },
       }),
     });
+
   } catch (error) {
     console.error("Error:", error);
     res.status(500).json({ message: "Document upload failed", error: error.message });
   }
 };
 
+
+
 // Get vendor registration status
 const getVendorStatus = async (req, res) => {
   try {
-    const { userId } = req.params;
+    // Securely pull authenticated identity context straight out of token extraction middleware
+    const userId = parseInt(req.user.id, 10); 
 
     const user = await prisma.user.findUnique({
-      where: { id: parseInt(userId) },
+      where: { id: userId },
       include: {
         businesses: {
           include: {
@@ -178,20 +234,52 @@ const getVendorStatus = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    // Since validation patterns limit users to one single registration context, pull index 0 safely
+    const rawBusiness = user.businesses && user.businesses.length > 0 
+      ? user.businesses[0] 
+      : null;
+
+    let hasDocumentsUploaded = false;
+    let hasBankLinked = false;
+
+    if (rawBusiness) {
+      // Evaluate actual child relation rows to accurately report progress checklist indicators
+      hasDocumentsUploaded = rawBusiness.hasDocuments || 
+        (Array.isArray(rawBusiness.documents) && rawBusiness.documents.length > 0);
+      
+      hasBankLinked = rawBusiness.hasBankDetails || 
+        rawBusiness.bankDetail !== null;
+    }
+
+    const businessPayload = rawBusiness ? {
+      ...rawBusiness,
+      hasDocuments: hasDocumentsUploaded,
+      hasBankDetails: hasBankLinked
+    } : null;
+
+    // Returns structural attributes clean to both direct lookups and nested data configurations
     res.json({
+      success: true,
       userId: user.id,
       phoneVerified: user.phoneVerified,
-      businesses: user.businesses,
+      business: businessPayload,
+      data: {
+        userId: user.id,
+        phoneVerified: user.phoneVerified,
+        business: businessPayload
+      },
       debug: true,
     });
   } catch (error) {
-    console.error("Error:", error);
-    res.status(500).json({ message: "Failed to fetch status", error: error.message });
+    console.error("Error inside getVendorStatus guard:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch status", error: error.message });
   }
 };
+
+
 
 // Step 5: Submit business bank details
 const submitBankDetails = async (req, res) => {
@@ -275,46 +363,72 @@ const getBusinessDetail = async (req, res) => {
   }
 };
 
-// Vendor: Dashboard core details
+
+// Replace your getVendorDashboard function with this updated code:
 const getVendorDashboard = async (req, res) => {
   try {
     const ownerId = parseInt(req.user.id, 10);
 
-    const business = await prisma.business.findFirst({
-      where: { ownerId },
+    // 🌟 ENHANCEMENT: Look for an active or under-review profile first to avoid stale fallbacks
+    let business = await prisma.business.findFirst({
+      where: { ownerId, status: "pending_review" },
       include: { documents: true, bankDetail: true, galleryImages: true },
-      orderBy: { createdAt: "desc" },
     });
+
+    // If no profile is pending review, grab the most recently modified profile row
+    if (!business) {
+      business = await prisma.business.findFirst({
+        where: { ownerId },
+        include: { documents: true, bankDetail: true, galleryImages: true },
+        orderBy: { updatedAt: "desc" }, // 👈 Keeps status states tied to current changes
+      });
+    }
 
     if (!business) {
       return res.json({
         success: true,
-        data: {
-          dashboard: {
-            business: null,
-            summary: null,
-            recentOrders: [],
-            salesSeries: [],
-          },
+        dashboard: {
+          business: null,
+          summary: null,
+          recentOrders: [],
+          salesSeries: [],
         },
       });
     }
 
-    res.json({
-      success: true,
-      data: {
-        dashboard: {
-          business,
-          summary: { totalSales: 0, totalOrders: 0 },
-          recentOrders: [],
-          salesSeries: [],
-        }
-      }
-    });
+    const hasDocumentsUploaded = business.hasDocuments || (Array.isArray(business.documents) && business.documents.length > 0);
+    const hasBankLinked = business.hasBankDetails || business.bankDetail !== null;
+// Replace the response block in your backend's getVendorDashboard controller:
+res.json({
+  success: true,
+  dashboard: {
+    business: {
+      ...business,
+      hasDocuments: hasDocumentsUploaded,
+      hasBankDetails: hasBankLinked
+    },
+    summary: { 
+      totalSales: 0, 
+      totalOrders: 0,
+      revenueToday: 0,
+      activeOrders: 0,
+      totalCustomers: 0,
+      avgOrderValue: 0,
+      avgDeliveryTimeMins: 0,
+      customerRating: 0,
+      avgPrepTimeMins: 0
+    },
+    recentOrders: [],
+    salesSeries: [],
+  }
+});
+
   } catch (error) {
     res.status(500).json({ success: false, message: "Dashboard error", error: error.message });
   }
 };
+
+
 
 // ── STEP 6: UPLOAD SHOWCASE GALLERY IMAGES ────────────────────────
 const uploadGalleryImages = async (req, res) => {

@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma");
-const { sendStatusNotificationEmail } = require("../services/email.service");
+const { sendStatusNotificationEmail } = require("../services/emailService");
 
 
 /**

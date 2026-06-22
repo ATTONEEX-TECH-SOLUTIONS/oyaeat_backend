@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma')
 const { getIo } = require('../socket/init');
+const { sendPlatformNotification } = require('../services/emailService');
 
 /**
  * Get all businesses pending review
@@ -162,27 +163,49 @@ exports.approveBusiness = async (req, res) => {
       });
     }
 
-    if (business.status !== 'pending_review') {
+    // ── 1. STORE STATUS BEFORE DB TRANSACTION MUTATION ──────────────────────
+    const previousStatus = business.status;
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── FIXED STATUS GUARD LAYER ─────────────────────────────────────────────
+    // This allows the operation to proceed whether it's an initial validation 
+    // request OR an account reactivation workflow from a suspended state.
+    if (previousStatus !== 'pending_review' && previousStatus !== 'suspended') {
       return res.status(400).json({
         success: false,
-        message: 'Business is not pending review'
+        message: 'Business is not pending review or suspended'
       });
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const updatedBusiness = await prisma.business.update({
       where: { id: parseInt(businessId) },
       data: {
         status: 'approved',
-        rejectionReason: null
+        rejectionReason: null // Clears out historical warning context tags automatically
       }
     });
 
-    // TODO: Send notification email to vendor
-    // await sendEmail(business.businessEmail, 'Business Approved', ...);
+    const targetEmail = business.businessEmail || (business.submitter && business.submitter.email);
+    if (targetEmail) {
+      // ── 2. NOW SAFE TO EVALUATE: Variable is accessible ──────────────────
+      const isReactivation = previousStatus === 'suspended';
+
+      sendPlatformNotification({
+        to: targetEmail,
+        businessName: updatedBusiness.name,
+        themeKey: 'success', // Forest green theme colors
+        headline: isReactivation ? 'Merchant Account Reactivated! 🎉' : 'Business Registration Approved! 🚀',
+        paragraphText: isReactivation 
+          ? 'Great news! Our administrative audit review is complete, and your store portal access has been fully restored. You are now authorized to resume active operations on the platform.'
+          : 'Welcome to the network! Your onboarding application documentation was successfully validated. Your menu listings are live and visible to local customers starting now.'
+      }).catch(err => console.error('Email background delivery failure:', err));
+    }
 
     res.status(200).json({
+      // ── 3. REUSED HERE AS WELL FOR PRECISE RESPONSE STRINGS ───────────────
       success: true,
-      message: 'Business approved successfully',
+      message: previousStatus === 'suspended' ? 'Business reactivated successfully' : 'Business approved successfully',
       data: { business: updatedBusiness }
     });
   } catch (error) {
@@ -194,6 +217,8 @@ exports.approveBusiness = async (req, res) => {
     });
   }
 };
+
+
 
 /**
  * Reject business
@@ -237,8 +262,17 @@ exports.rejectBusiness = async (req, res) => {
       }
     });
 
-    // TODO: Send notification email to vendor
-    // await sendEmail(business.businessEmail, 'Business Rejected', ...);
+     
+  const targetEmail = business.businessEmail || (business.submitter && business.submitter.email);
+  if (targetEmail) {
+    sendPlatformNotification({
+      to: targetEmail,
+      businessName: business.name,
+      themeKey: 'danger', // 👈 Red accent alerts formatting
+      headline: 'Update Required: Registration Application Declined ❌',
+      paragraphText: `Thank you for your interest in partnering with us. Unfortunately, your onboarding submission could not be verified in its current form due to compliance discrepancies. <br/><br/><strong>Official Reason Provided:</strong> "${reason}"<br/><br/>Please re-upload clear, valid identification records through your merchant portal to re-submit your profile layout.`,
+    }).catch(err => console.error(err));
+  }
 
     res.status(200).json({
       success: true,
@@ -282,6 +316,20 @@ exports.suspendBusiness = async (req, res) => {
         rejectionReason: reason
       }
     });
+
+
+    
+
+  const targetEmail = business.businessEmail || (business.submitter && business.submitter.email);
+  if (targetEmail) {
+    sendPlatformNotification({
+      to: targetEmail,
+      businessName: business.name,
+      themeKey: 'warning', 
+      headline: 'Account Action Notice: Operations Suspended ⚠️',
+      paragraphText: `Please be notified that your store operations dashboard profile layer has been temporarily suspended by system administrators.<br/><br/><strong>Reason for Action:</strong> "${reason}"<br/><br/>Platform order fulfillment capabilities and portal distribution pipelines are locked out. Please get in touch with regional operator support nodes to resolve this non-compliance file loop.`,
+    }).catch(err => console.error(err));
+  }
 
     res.status(200).json({
       success: true,

@@ -81,3 +81,4 @@ const sendPlatformNotification = async ({ to, businessName, headline, paragraphT
 };
 
 module.exports = { sendPlatformNotification };
+ 

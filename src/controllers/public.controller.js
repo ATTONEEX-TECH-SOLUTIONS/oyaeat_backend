@@ -8,6 +8,10 @@ exports.listRestaurants = async (req, res) => {
 
     const where = {
       status: "approved",
+      // 🚀 EXPLICIT LAYER DETECTOR: Lock out any active shadow or main suspensions
+      NOT: {
+        status: "suspended"
+      },
       ...(q
         ? {
             OR: [
@@ -71,6 +75,7 @@ exports.listRestaurants = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch restaurants", error: e.message });
   }
 };
+
 
 // GET /public/restaurants/:businessId/menu
 exports.getRestaurantMenu = async (req, res) => {

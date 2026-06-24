@@ -41,7 +41,7 @@ exports.getPendingBusinesses = async (req, res) => {
 };
 
 /**
- * Get all businesses (with filters)
+ * Get all businesses (with filters & dynamic suspension parsing)
  * GET /api/admin/businesses
  */
 exports.getAllBusinesses = async (req, res) => {
@@ -51,7 +51,7 @@ exports.getAllBusinesses = async (req, res) => {
 
     const where = status ? { status } : {};
 
-    const [businesses, total] = await Promise.all([
+    const [rawBusinesses, total] = await Promise.all([
       prisma.business.findMany({
         where,
         include: {
@@ -73,6 +73,30 @@ exports.getAllBusinesses = async (req, res) => {
       }),
       prisma.business.count({ where })
     ]);
+
+    // 🚀 THE FIX: Dynamically scan and attach suspension metadata virtual columns 
+    // so your Superadmin UI can see if an account is shadow or main!
+    const businesses = rawBusinesses.map((biz) => {
+      let suspensionType = null;
+      let cleanReason = biz.rejectionReason;
+
+      if (biz.status === 'suspended' && biz.rejectionReason) {
+        const rawReason = String(biz.rejectionReason).trim();
+        if (/^MAIN:/i.test(rawReason)) {
+          suspensionType = 'main';
+          cleanReason = rawReason.replace(/^MAIN:\s*/i, '');
+        } else {
+          suspensionType = 'shadow';
+          cleanReason = rawReason.replace(/^SHADOW:\s*/i, '');
+        }
+      }
+
+      return {
+        ...biz,
+        suspensionType, // Virtual flag read by the frontend code structure
+        rejectionReason: cleanReason // Returns clean text to your admin preview screens
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -290,13 +314,20 @@ exports.rejectBusiness = async (req, res) => {
 };
 
 /**
- * Suspend business
+ * Suspend business (Zero-migration strategy using string tags)
  * POST /api/admin/businesses/:businessId/suspend
  */
 exports.suspendBusiness = async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { reason } = req.body;
+    const { reason, suspensionType = 'shadow' } = req.body; 
+
+    if (!['shadow', 'main'].includes(suspensionType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid suspension type parameters. Must be 'shadow' or 'main'."
+      });
+    }
 
     const business = await prisma.business.findUnique({
       where: { id: parseInt(businessId) }
@@ -305,46 +336,56 @@ exports.suspendBusiness = async (req, res) => {
     if (!business) {
       return res.status(404).json({
         success: false,
-        message: 'Business not found'
+        message: 'Business record not located'
       });
     }
+
+    // 🚀 THE FIX: Instead of an unknown column, we bake the strategy directly into the text field!
+    // Example output text inside your database: "SHADOW: The kitchen is too slow today."
+    const packedReasonString = `${suspensionType.toUpperCase()}: ${reason.trim()}`;
 
     const updatedBusiness = await prisma.business.update({
       where: { id: parseInt(businessId) },
       data: {
-        status: 'suspended',
-        rejectionReason: reason
+        status: 'suspended', // Satisfies your pristine database Enum value perfectly
+        rejectionReason: packedReasonString
       }
     });
 
+    // Send notifications
+    const targetEmail = business.businessEmail || (business.submitter && business.submitter.email);
+    if (targetEmail) {
+      let emailHeadline = suspensionType === 'shadow' ? 'Store Visibility Update: Store Hidden ⚠️' : 'Account Action Critical Notice: Operations Suspended 🚨';
+      let emailParagraphText = suspensionType === 'shadow' 
+        ? `Please be notified that your storefront has been temporarily hidden (Shadow Suspended) by platform operations.<br/><br/><strong>Reason:</strong> "${reason}"`
+        : `Please be notified that your vendor dashboard profile access layer has been fully suspended.<br/><br/><strong>Reason:</strong> "${reason}"`;
 
-    
-
-  const targetEmail = business.businessEmail || (business.submitter && business.submitter.email);
-  if (targetEmail) {
-    sendPlatformNotification({
-      to: targetEmail,
-      businessName: business.name,
-      themeKey: 'warning', 
-      headline: 'Account Action Notice: Operations Suspended ⚠️',
-      paragraphText: `Please be notified that your store operations dashboard profile layer has been temporarily suspended by system administrators.<br/><br/><strong>Reason for Action:</strong> "${reason}"<br/><br/>Platform order fulfillment capabilities and portal distribution pipelines are locked out. Please get in touch with regional operator support nodes to resolve this non-compliance file loop.`,
-    }).catch(err => console.error(err));
-  }
+      if (typeof sendPlatformNotification === 'function') {
+        sendPlatformNotification({
+          to: targetEmail,
+          businessName: business.name,
+          themeKey: suspensionType === 'shadow' ? 'warning' : 'danger', 
+          headline: emailHeadline,
+          paragraphText: emailParagraphText,
+        }).catch(err => console.error('Notification dispatch error:', err));
+      }
+    }
 
     res.status(200).json({
       success: true,
-      message: 'Business suspended',
+      message: `Business successfully placed under ${suspensionType} suspension.`,
       data: { business: updatedBusiness }
     });
   } catch (error) {
-    console.error('Suspend business error:', error);
+    console.error('Suspend business operational error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to suspend business',
+      message: 'Failed to complete store suspension operation',
       error: error.message
     });
   }
 };
+
 
 /**
  * Get business statistics

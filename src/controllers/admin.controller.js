@@ -74,26 +74,37 @@ exports.getAllBusinesses = async (req, res) => {
       prisma.business.count({ where })
     ]);
 
-    // 🚀 THE FIX: Dynamically scan and attach suspension metadata virtual columns 
-    // so your Superadmin UI can see if an account is shadow or main!
+    // 🚀 THE FIX: Enhanced scanner with flexible regex handling for all string variations
     const businesses = rawBusinesses.map((biz) => {
       let suspensionType = null;
       let cleanReason = biz.rejectionReason;
 
       if (biz.status === 'suspended' && biz.rejectionReason) {
         const rawReason = String(biz.rejectionReason).trim();
-        if (/^MAIN:/i.test(rawReason)) {
+        
+        // Match string combinations containing "MAIN" regardless of brackets, headers, or spacing
+        if (/main/i.test(rawReason)) {
           suspensionType = 'main';
-          cleanReason = rawReason.replace(/^MAIN:\s*/i, '');
+          // Clean up common prefix tags to leave only the raw human note text
+          cleanReason = rawReason
+            .replace(/^\[.*?\]:\s*/i, '')   // Strips custom context labels like [Appeal Filed]:
+            .replace(/^MAIN:\s*/i, '')      // Strips standard MAIN: tags
+            .replace(/^\[MAIN\]:\s*/i, '')  // Strips bracketed variants
+            .trim();
         } else {
+          // Fallback context: Default to shadow tracking profiles
           suspensionType = 'shadow';
-          cleanReason = rawReason.replace(/^SHADOW:\s*/i, '');
+          cleanReason = rawReason
+            .replace(/^\[.*?\]:\s*/i, '')
+            .replace(/^SHADOW:\s*/i, '')
+            .replace(/^\[SHADOW\]:\s*/i, '')
+            .trim();
         }
       }
 
       return {
         ...biz,
-        suspensionType, // Virtual flag read by the frontend code structure
+        suspensionType,             // Virtual flag read by the frontend code structure
         rejectionReason: cleanReason // Returns clean text to your admin preview screens
       };
     });

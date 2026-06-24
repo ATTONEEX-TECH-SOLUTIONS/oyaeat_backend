@@ -36,17 +36,19 @@ exports.submitOperationalAppeal = async (req, res) => {
     // 3. Execute atomic transaction updates using Prisma
     const updatedBusiness = await prisma.$transaction(async (tx) => {
       
-      // If a file was securely processed on Cloudinary, save its secure public web URL
-      if (file) {
-        await tx.businessDocument.create({
-          data: {
-            businessId: parseInt(businessId),
-            name: file.originalname || 'Compliance Appeal Evidence Document',
-            type: 'appeal_evidence',
-            url: file.path, // 🚀 SECURE CLOUDINARY PUBLIC URL (e.g., https://cloudinary.com...)
-          },
-        });
-      }
+      
+     // If a file was securely processed on Cloudinary, save its secure public web URL
+if (file) {
+  await tx.businessDocument.create({
+    data: {
+      businessId: parseInt(businessId),
+      type: 'appeal_evidence',
+      url: file.path, 
+      fileName: file.originalname || 'Compliance Appeal Evidence Document' // ◄ Moved your name fallback here
+    },
+  });
+}
+
 
       // Transition the store state so it flags back onto your superadmin review dashboard
       return await tx.business.update({

@@ -99,6 +99,11 @@ model Business {
   description     String?
   status          BusinessStatus @default(draft)
   rejectionReason String?
+  
+  // 🔒 TWO-LAYER SUSPENSION TRACKER
+  // Expects: null (active), "shadow" (hidden storefront), or "main" (hard lockout)
+  suspensionType  String?        
+
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -141,6 +146,7 @@ model Business {
 
   notifications Notification[]
 }
+
 
 // ── NEW: TRACKS IF RIDER IS ONLINE + CURRENT GPS COORDINATES ──
 model ShiftLog {

@@ -44,6 +44,7 @@ const riderRoutes = require("./routes/rider.routes");
 const adminRiderRouter = require("./routes/adminRider.routes");
 const chatRoutes = require("./routes/chat.routes");
 const walletRoutes = require("./routes/wallet.routes");
+const complianceRoutes = require('./routes/compliance.routes');
 
 
 
@@ -67,6 +68,7 @@ app.use("/auth/rider", riderAuthRoutes);
 app.use("/rider", riderRoutes);
 app.use("/api/rider/admin", adminRiderRouter);
 app.use("/api/wallet", walletRoutes);
+app.use('/compliance', complianceRoutes);
 
 
 app.get('/docs-test', (req, res) => {

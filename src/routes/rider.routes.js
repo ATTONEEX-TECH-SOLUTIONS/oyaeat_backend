@@ -25,6 +25,9 @@ router.put("/location/ping", riderController.updateLiveLocation);
 // Delivery Action (Claim a processing order)
 router.put("/orders/:orderId/accept", riderController.acceptOrder);
 
+// Decline an offer
+router.post("/orders/:orderId/decline", riderController.declineOrder);
+
 // Expose drop-off completion endpoint
 router.put("/orders/:orderId/complete", riderController.completeDelivery);
 

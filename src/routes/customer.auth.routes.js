@@ -10,4 +10,7 @@ router.post("/login", customerAuthController.loginCustomer);
 router.get("/me", authMiddleware, requireRole("customer"), customerAuthController.getProfile);
 router.patch("/me", authMiddleware, requireRole("customer"), customerAuthController.updateProfile);
 
+router.post("/forgot-password", require("../controllers/password.controller").forgotPassword);
+router.post("/reset-password", require("../controllers/password.controller").resetPassword);
+
 module.exports = router;

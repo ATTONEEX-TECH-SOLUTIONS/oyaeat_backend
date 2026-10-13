@@ -89,6 +89,9 @@ router.post(  "/staff",           vendorStaffController.createStaff);
 router.patch( "/staff/:staffId",  vendorStaffController.updateStaff);
 router.delete("/staff/:staffId",  vendorStaffController.deleteStaff);
 
+// ─── Reviews ─────────────────────────────────────────────────
+router.get("/reviews", require("../controllers/review.controller").getVendorReviews);
+
 // ─── Orders ──────────────────────────────────────────────────
 router.get(  "/orders",                    vendorOrdersController.getOrders);
 router.patch("/orders/:orderId/status",    vendorOrdersController.updateOrderStatus);

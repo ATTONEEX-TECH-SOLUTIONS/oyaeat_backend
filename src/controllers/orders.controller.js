@@ -481,7 +481,11 @@ exports.dispatchOrderToRiders = async (req, res) => {
     }
 
     // Identify nearby riders located inside a 5km operational ring
-    const eligibleRiders = await findNearbyAvailableRiders(order.businessId, 5.0);
+    const nearby = await findNearbyAvailableRiders(order.businessId, 5.0);
+    const declined = new Set(
+      (await prisma.orderDecline.findMany({ where: { orderId }, select: { riderId: true } })).map((d) => d.riderId)
+    );
+    const eligibleRiders = nearby.filter((r) => !declined.has(r.riderId));
 
     // ── NEW LIVE SOCKET BROADCAST LOOPS ──
     const ioInstance = getIO();

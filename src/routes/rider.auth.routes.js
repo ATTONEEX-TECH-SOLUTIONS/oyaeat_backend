@@ -9,4 +9,7 @@ router.post("/register", upload.single("idDocument"), riderAuthController.regist
 // Login rider
 router.post("/login", riderAuthController.login);
 
+router.post("/forgot-password", require("../controllers/password.controller").forgotPassword);
+router.post("/reset-password", require("../controllers/password.controller").resetPassword);
+
 module.exports = router;

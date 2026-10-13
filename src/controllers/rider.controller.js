@@ -77,7 +77,8 @@ exports.getDashboard = async (req, res) => {
       rawActiveOrder = await prisma.order.findFirst({
         where: {
           status: "ready",
-          riderId: null // Means no rider has claimed it yet
+          riderId: null, // Means no rider has claimed it yet
+          declines: { none: { riderId: userId } } // skip offers this rider declined
         },
         orderBy: { createdAt: "asc" }, // Show oldest available order first
         include: { business: true }
@@ -261,6 +262,37 @@ exports.acceptOrder = async (req, res) => {
     res.json({ message: "Order accepted successfully!", order: updatedOrder });
   } catch (error) {
     res.status(500).json({ message: "Failed to accept order", error: error.message });
+  }
+};
+
+/**
+ * Decline a delivery offer (remembered, so it is not offered to this rider again)
+ * Route: POST /rider/orders/:orderId/decline
+ */
+exports.declineOrder = async (req, res) => {
+  try {
+    const riderId = parseInt(req.user.id, 10);
+    const orderId = parseInt(req.params.orderId, 10);
+    if (isNaN(orderId)) {
+      return res.status(400).json({ message: "Invalid order id." });
+    }
+
+    const order = await prisma.order.findUnique({ where: { id: orderId }, select: { id: true, riderId: true } });
+    if (!order) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+    if (order.riderId === riderId) {
+      return res.status(409).json({ message: "You already accepted this order." });
+    }
+
+    await prisma.orderDecline.upsert({
+      where: { orderId_riderId: { orderId, riderId } },
+      update: {},
+      create: { orderId, riderId }
+    });
+    res.json({ success: true, message: "Offer declined." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to decline order", error: error.message });
   }
 };
 

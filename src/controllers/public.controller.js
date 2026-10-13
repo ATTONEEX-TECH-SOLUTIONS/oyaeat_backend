@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { withRatings } = require("./review.controller");
 
 // GET /public/restaurants
 exports.listRestaurants = async (req, res) => {
@@ -62,7 +63,7 @@ exports.listRestaurants = async (req, res) => {
     res.json({
       success: true,
       data: {
-        restaurants,
+        restaurants: await withRatings(restaurants),
         pagination: {
           total,
           page: Number(page),
@@ -126,7 +127,7 @@ exports.getRestaurantMenu = async (req, res) => {
     res.json({
       success: true,
       data: {
-        restaurant: business,
+        restaurant: (await withRatings([business]))[0],
         menu: items,
       },
     });

@@ -80,5 +80,29 @@ const sendPlatformNotification = async ({ to, businessName, headline, paragraphT
   }
 };
 
-module.exports = { sendPlatformNotification };
+const STATUS_COPY = {
+  verified: ["Account Verified", "Your account has been verified. You can now sign in and get started.", "success"],
+  active: ["Account Activated", "Your account is now active.", "success"],
+  inactive: ["Account Deactivated", "Your account has been deactivated. Contact support if you think this is a mistake.", "warning"],
+  pending: ["Account Under Review", "Your account is pending review. We will notify you once it is processed.", "info"],
+};
+
+/** Notifies a user (e.g. a rider) that an admin changed their account status. */
+const sendStatusNotificationEmail = (to, firstName, status, kind = "account") => {
+  const [headline, paragraphText, themeKey] = STATUS_COPY[status] || ["Account Update", `Your ${kind} status is now "${status}".`, "info"];
+  return sendPlatformNotification({ to, businessName: firstName, headline, paragraphText, themeKey });
+};
+
+/** Sends the password reset link. Returns true when the mail was handed to SMTP. */
+const sendPasswordResetEmail = (to, firstName, resetUrl) =>
+  sendPlatformNotification({
+    to,
+    businessName: firstName,
+    headline: "Reset your password",
+    paragraphText: "We received a request to reset your OyaEat password. The link below is valid for 30 minutes. If you did not ask for this, you can ignore this email.",
+    themeKey: "info",
+    actionUrl: resetUrl,
+  });
+
+module.exports = { sendPlatformNotification, sendStatusNotificationEmail, sendPasswordResetEmail };
  

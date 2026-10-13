@@ -15,5 +15,6 @@ router.use("/admin", authMiddleware, adminMiddleware);
 router.get("/admin/financial-queue-logs", walletController.getAdminFinancialQueueLogs);
 router.post("/admin/onboard-bank", walletController.manuallyLinkEmailBank);
 router.put("/admin/resolve-payout/:transactionId", walletController.resolveAdminPayout);
+router.post("/admin/resolve-payout/:transactionId", walletController.resolveAdminPayout);
 
 module.exports = router;

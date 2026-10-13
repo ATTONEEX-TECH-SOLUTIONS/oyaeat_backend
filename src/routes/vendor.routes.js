@@ -74,6 +74,9 @@ router.get( "/business/:businessId", vendorController.getBusinessDetail);
 // ─── Settings ────────────────────────────────────────────────
 router.get(  "/business/:businessId/settings",             vendorSettingsController.getBusinessSettings);
 router.patch("/business/:businessId/settings",             vendorSettingsController.updateBusinessSettings);
+router.put(  "/business/:businessId/settings",             vendorSettingsController.updateBusinessSettings);
+router.put(  "/business/:businessId/settings/:section",    vendorSettingsController.updateBusinessSettings);
+router.patch("/business/:businessId/settings/:section",    vendorSettingsController.updateBusinessSettings);
 router.post( "/business/:businessId/settings/thumbnail",   upload.single("thumbnail"),  vendorSettingsController.uploadThumbnail);
 router.post( "/business/:businessId/settings/profile-pic", upload.single("profilePic"), vendorSettingsController.uploadProfilePic);
 

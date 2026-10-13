@@ -61,6 +61,7 @@ app.use("/admin", adminRoutes);
 app.use("/public", publicRoutes);
 
 app.use("/chat", chatRoutes);
+app.use("/api/chat", chatRoutes); // alias: the frontend also calls /api/chat/*
 
 app.use("/orders", ordersRoutes);
 app.use("/customer/auth", customerAuthRoutes);

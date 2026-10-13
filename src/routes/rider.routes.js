@@ -38,19 +38,6 @@ router.get("/earnings/summary", earningsController.getRiderEarnings);
 
 router.put("/profile/update", upload.single("avatar"), riderController.updateRiderProfile);
 
-// Append directly inside your protected rider/vendor routes file:
-router.get("/operations-alerts", authMiddleware, async (req, res) => {
-  try {
-    const alerts = await prisma.riderAlert.findMany({
-      where: { riderId: req.user.id },
-      orderBy: { createdAt: "desc" }
-    });
-    return res.json({ success: true, data: alerts });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-
+router.get("/operations-alerts", riderController.getOperationsAlerts);
 
 module.exports = router;

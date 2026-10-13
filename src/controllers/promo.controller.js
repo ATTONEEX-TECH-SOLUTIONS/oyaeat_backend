@@ -351,6 +351,15 @@ exports.togglePromoStatus = async (req, res) => {
     const promoId = parseInt(req.params.id, 10);
     const { isActive } = req.body;
 
+    // Vendors may only toggle their own campaigns; admins may toggle any.
+    if (String(req.user.role).toLowerCase() !== "admin") {
+      const own = await prisma.promo.findFirst({
+        where: { id: promoId, business: { ownerId: req.user.id } },
+        select: { id: true }
+      });
+      if (!own) return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+
     let updatedExpirationDate = new Date();
     if (isActive) updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
 

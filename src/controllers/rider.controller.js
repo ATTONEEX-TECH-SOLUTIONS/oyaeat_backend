@@ -509,3 +509,73 @@ exports.rejectRiderApplication = async (req, res) => {
     res.status(500).json({ message: "Failed to delete rider registry data record", error: error.message });
   }
 };
+
+
+/**
+ * Admin Action: Edit a rider's details
+ * Route: PATCH /api/rider/admin/:id
+ */
+exports.updateRiderByAdmin = async (req, res) => {
+  try {
+    const riderId = parseInt(req.params.id, 10);
+    if (isNaN(riderId)) {
+      return res.status(400).json({ message: "Invalid rider identity target parameter." });
+    }
+
+    const { firstName, lastName, phone, vehicleType, plateNumber } = req.body;
+    const rider = await prisma.user.findFirst({ where: { id: riderId, role: "rider" }, select: { id: true } });
+    if (!rider) {
+      return res.status(404).json({ message: "Rider not found." });
+    }
+
+    if (phone) {
+      const taken = await prisma.user.findFirst({ where: { phone, NOT: { id: riderId } }, select: { id: true } });
+      if (taken) return res.status(409).json({ message: "Phone number already in use" });
+    }
+
+    const profileData = {
+      ...(vehicleType != null && { vehicleType }),
+      ...(plateNumber !== undefined && { plateNumber: plateNumber || null }),
+    };
+
+    const updated = await prisma.user.update({
+      where: { id: riderId },
+      data: {
+        ...(firstName != null && { firstName }),
+        ...(lastName != null && { lastName }),
+        ...(phone != null && { phone }),
+        ...(Object.keys(profileData).length && {
+          riderProfile: {
+            upsert: {
+              update: profileData,
+              create: { vehicleType: vehicleType || "motorcycle", idDocumentUrl: "ADMIN_CREATED", ...profileData },
+            },
+          },
+        }),
+      },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true, status: true,
+        riderProfile: { select: { vehicleType: true, plateNumber: true, idDocumentUrl: true } },
+      },
+    });
+
+    res.json({ message: "Rider updated successfully.", rider: updated });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update rider", error: error.message });
+  }
+};
+
+/**
+ * Rider operations alerts (shared by /rider/operations-alerts and /chat/operations-alerts)
+ */
+exports.getOperationsAlerts = async (req, res) => {
+  try {
+    const alerts = await prisma.riderAlert.findMany({
+      where: { riderId: req.user.id },
+      orderBy: { createdAt: "desc" }
+    });
+    return res.json({ success: true, data: alerts });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chat.controller');
+const requireRole = require('../middlewares/role.middleware');
 const authMiddleware = require('../middlewares/auth.middleware');
 
 router.use(authMiddleware);
+
+router.get('/operations-alerts', requireRole('rider'), require('../controllers/rider.controller').getOperationsAlerts);
 
 router.get('/threads', chatController.getThreads);
 router.post('/threads', chatController.createSupportThread);

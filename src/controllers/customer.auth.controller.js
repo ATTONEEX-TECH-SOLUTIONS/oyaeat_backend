@@ -109,3 +109,55 @@ exports.loginCustomer = async (req, res) => {
     res.status(500).json({ success: false, message: "Login failed", error: e.message });
   }
 };
+
+const PROFILE_SELECT = { id: true, firstName: true, lastName: true, email: true, phone: true, role: true };
+
+// GET /customer/auth/me
+exports.getProfile = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: PROFILE_SELECT });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    res.json({ success: true, data: { user } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "Failed to load profile", error: e.message });
+  }
+};
+
+// PATCH /customer/auth/me  { firstName?, lastName?, phone?, currentPassword?+newPassword? }
+exports.updateProfile = async (req, res) => {
+  try {
+    const { firstName, lastName, phone, currentPassword, newPassword } = req.body;
+    const data = {};
+    if (firstName !== undefined) data.firstName = String(firstName).trim();
+    if (lastName !== undefined) data.lastName = String(lastName).trim();
+    if (data.firstName === "" || data.lastName === "") {
+      return res.status(400).json({ success: false, message: "Names cannot be empty" });
+    }
+
+    if (phone !== undefined) {
+      const taken = await prisma.user.findFirst({ where: { phone, NOT: { id: req.user.id } }, select: { id: true } });
+      if (taken) return res.status(409).json({ success: false, message: "Phone number already in use" });
+      data.phone = phone;
+    }
+
+    if (newPassword !== undefined) {
+      if (String(newPassword).length < 6) {
+        return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+      }
+      const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { password: true } });
+      if (!currentPassword || !(await bcrypt.compare(currentPassword, current.password))) {
+        return res.status(401).json({ success: false, message: "Current password is incorrect" });
+      }
+      data.password = await bcrypt.hash(newPassword, 10);
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ success: false, message: "Nothing to update" });
+    }
+
+    const user = await prisma.user.update({ where: { id: req.user.id }, data, select: PROFILE_SELECT });
+    res.json({ success: true, message: "Profile updated", data: { user } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "Failed to update profile", error: e.message });
+  }
+};

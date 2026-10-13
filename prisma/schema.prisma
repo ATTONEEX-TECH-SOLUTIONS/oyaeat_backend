@@ -72,6 +72,12 @@ model User {
   shiftLogs ShiftLog[]
 
   wallet Wallet?
+
+  passwordResetTokens PasswordResetToken[]
+  addresses           CustomerAddress[]
+  favorites           FavoriteRestaurant[]
+  reviews             Review[]
+  orderDeclines       OrderDecline[]
 }
 
 model PhoneVerification {
@@ -146,6 +152,8 @@ model Business {
   orders       Order[]
 
   notifications Notification[]
+  favoritedBy   FavoriteRestaurant[]
+  reviews       Review[]
 }
 
 
@@ -258,6 +266,8 @@ model Order {
   payout           Float?
 
   walletTransactions WalletTransaction[]
+  review             Review?
+  declines           OrderDecline[]
 
   @@index([businessId])
   @@index([customerId])
@@ -397,4 +407,68 @@ enum TransactionStatus {
   pending
   completed
   failed
+}
+
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model CustomerAddress {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  address   String
+  latitude  Float?
+  longitude Float?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model FavoriteRestaurant {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, businessId])
+}
+
+model Review {
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @unique
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  businessId Int
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId Int
+  customer   User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model OrderDecline {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId   Int
+  rider     User     @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, riderId])
 }

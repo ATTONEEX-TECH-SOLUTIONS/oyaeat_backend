@@ -14,6 +14,7 @@ const upload = require("../middlewares/upload.middleware");           // Your mu
    ========================================== */
 router.get("/restaurants", publicController.listRestaurants);
 router.get("/restaurants/:businessId/menu", publicController.getRestaurantMenu);
+router.get("/restaurants/:businessId/reviews", require("../controllers/review.controller").getPublicReviews);
 router.get("/promos/public-feed", promoController.getPublicPromoFeed);
 
 /* ==========================================

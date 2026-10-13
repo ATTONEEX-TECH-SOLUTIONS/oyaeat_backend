@@ -133,6 +133,47 @@ exports.verifyPhoneNumber = async (req, res) => {
 
 
 
+// Resend the phone verification code (OTP is still the hardcoded test code)
+exports.resendOtp = async (req, res) => {
+  try {
+    const userId = parseInt(req.body.userId, 10);
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.phoneVerified) {
+      return res.status(400).json({ message: "Phone number is already verified" });
+    }
+
+    const last = await prisma.phoneVerification.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
+    const waitMs = 30 * 1000;
+    if (last && Date.now() - last.createdAt.getTime() < waitMs) {
+      const retryAfter = Math.ceil((waitMs - (Date.now() - last.createdAt.getTime())) / 1000);
+      return res.status(429).json({ message: `Please wait ${retryAfter}s before requesting a new code`, retryAfter });
+    }
+
+    await prisma.phoneVerification.create({
+      data: {
+        userId,
+        code: "123456", // HARDCODED OTP, same as registration
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        verified: false,
+      },
+    });
+
+    res.json({ message: "Verification code sent", otp: "123456" }); // otp echoed for testing only
+  } catch (error) {
+    res.status(500).json({ message: "Could not resend code", error: error.message });
+  }
+};
+
 // Login: email + password, returns JWT and vendor dashboard summary
 exports.login = async (req, res) => {
   try {

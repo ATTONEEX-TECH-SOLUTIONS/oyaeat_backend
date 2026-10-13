@@ -26,7 +26,8 @@ router.get("/broadcasts/approved-list", authMiddleware, async (req, res) => {
       where: { status: "approved" },
       select: { id: true, name: true, city: true }
     });
-    return res.json({ success: true, businesses: approved });
+    // `data` is what the frontend reads; `businesses` kept for older callers
+    return res.json({ success: true, data: approved, businesses: approved });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -36,6 +37,7 @@ router.patch(
   "/broadcasts/:id/toggle", 
   authMiddleware, 
   promoController.togglePromoStatus )
+router.post("/broadcasts/:id/toggle", promoController.togglePromoStatus);
 
 
 
@@ -44,9 +46,11 @@ router.get('/broadcasts/pending-reviews', promoController.getPendingVendorPromos
 
 
 router.patch("/broadcasts/:id/approve", promoController.approveVendorPromo);
+router.post("/broadcasts/:id/approve", promoController.approveVendorPromo);
 
 
 router.patch("/broadcasts/:id/reject", promoController.rejectVendorPromo);
+router.post("/broadcasts/:id/reject", promoController.rejectVendorPromo);
 
 
 router.get('/broadcasts/active', promoController.getActivePromos);
@@ -77,6 +81,9 @@ router.post('/businesses/:businessId/reject', adminController.rejectBusiness);
 // Suspend business
 router.post('/businesses/:businessId/suspend', adminController.suspendBusiness);
 
+// Single status endpoint: { status: approved|rejected|suspended, reason?, suspensionType? }
+router.patch('/businesses/:businessId/status', adminController.updateBusinessStatus);
+
 // Get all global orders
 router.get('/orders', adminController.getGlobalOrders);
 
@@ -88,5 +95,12 @@ router.delete("/broadcasts/:id", promoController.deletePromoBannerInstance);
 
 router.get("/settings", authMiddleware, settingsController.getSystemSettings);
 router.patch("/settings", authMiddleware, settingsController.updateSystemSettings);
+router.put("/settings", settingsController.updateSystemSettings);
+
+// Payout tooling is also reachable under /admin (canonical home is /api/wallet/admin)
+const walletController = require("../controllers/wallet.controller");
+router.post("/onboard-bank", walletController.manuallyLinkEmailBank);
+router.post("/resolve-payout/:transactionId", walletController.resolveAdminPayout);
+router.put("/resolve-payout/:transactionId", walletController.resolveAdminPayout);
 
 module.exports = router;

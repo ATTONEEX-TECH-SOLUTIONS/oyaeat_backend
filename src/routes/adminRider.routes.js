@@ -20,6 +20,9 @@ router.get("/all", riderController.getAllRiders);
  */
 router.patch("/:id/status", riderController.updateRiderStatus);
 
+/** Admin Action: Edit rider details — PATCH /api/rider/admin/:id */
+router.patch("/:id", riderController.updateRiderByAdmin);
+
 /**
  * Admin Action: Reject and drop registration applications
  * Route Prefix: DELETE /api/rider/admin/:id

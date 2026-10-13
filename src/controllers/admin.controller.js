@@ -623,3 +623,22 @@ exports.sanitizeAndBroadcastAdvert = async (req, res) => {
 
 
 module.exports = exports;
+
+
+// PATCH /admin/businesses/:businessId/status
+exports.updateBusinessStatus = (req, res) => {
+  const status = String(req.body.status || "").toLowerCase();
+  const handlers = {
+    approved: exports.approveBusiness, approve: exports.approveBusiness,
+    rejected: exports.rejectBusiness, reject: exports.rejectBusiness,
+    suspended: exports.suspendBusiness, suspend: exports.suspendBusiness,
+  };
+  const handler = handlers[status];
+  if (!handler) {
+    return res.status(400).json({
+      success: false,
+      message: "status must be one of: approved, rejected, suspended"
+    });
+  }
+  return handler(req, res);
+};

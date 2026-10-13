@@ -104,7 +104,7 @@ exports.manuallyLinkEmailBank = async (req, res) => {
 // ── ENDPOINT C: USER EXECUTES WITHDRAWAL REQUEST (Riders & Vendors) ──
 exports.requestWithdrawal = async (req, res) => {
   const userId = req.user.id;
-  const userRole = req.user.role;
+  const userRole = req.user.role ? req.user.role.toLowerCase() : "";
   const { amount } = req.body;
 
   try {
@@ -170,26 +170,33 @@ exports.requestWithdrawal = async (req, res) => {
       });
     }
 
-    // 5. Deduct from available balance, add to pending payouts, and log a pending ledger item
-    await prisma.$transaction([
-      prisma.wallet.update({
-        where: { userId },
+    // 5. Deduct atomically: the balance check is repeated inside the update so
+    //    concurrent requests cannot overdraw the wallet.
+    const reserved = await prisma.$transaction(async (tx) => {
+      const debited = await tx.wallet.updateMany({
+        where: { id: wallet.id, balance: { gte: amountNum } },
         data: {
           balance: { decrement: amountNum },
           pendingPayouts: { increment: amountNum }
         }
-      }),
+      });
+      if (debited.count === 0) return false;
 
-      prisma.walletTransaction.create({
+      await tx.walletTransaction.create({
         data: {
           walletId: wallet.id,
           amount: amountNum,
           type: "debit",
-          status: "pending", // 🌟 Appears instantly on Super-Admin Payout table queue
+          status: "pending", // Appears on the Super-Admin payout queue
           description: "Manual Withdrawal Request (Awaiting Admin Bank Wire)"
         }
-      })
-    ]);
+      });
+      return true;
+    });
+
+    if (!reserved) {
+      return res.status(400).json({ success: false, message: "Insufficient wallet balance for this request." });
+    }
 
     res.json({ 
       success: true, 
@@ -225,20 +232,24 @@ exports.resolveAdminPayout = async (req, res) => {
       });
     }
 
-    // 3. Mark the payout status as completed and clear the funds out of pendingPayouts inside a transaction
-    await prisma.$transaction([
-      prisma.walletTransaction.update({
-        where: { id: transactionId },
+    // 3. Claim the pending row and release the hold in one transaction, so a
+    //    double click / retry cannot flush pendingPayouts twice.
+    const resolved = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.walletTransaction.updateMany({
+        where: { id: transactionId, status: "pending", type: "debit" },
         data: { status: "completed" }
-      }),
-
-      prisma.wallet.update({
+      });
+      if (claimed.count === 0) return false;
+      await tx.wallet.update({
         where: { id: transaction.walletId },
-        data: {
-          pendingPayouts: { decrement: transaction.amount } // 🌟 Permanently flushes cash out of hold pool
-        }
-      })
-    ]);
+        data: { pendingPayouts: { decrement: transaction.amount } }
+      });
+      return true;
+    });
+
+    if (!resolved) {
+      return res.status(409).json({ success: false, message: "This payout was already processed." });
+    }
 
     res.json({ 
       success: true, 

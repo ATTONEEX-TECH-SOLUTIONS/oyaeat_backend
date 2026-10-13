@@ -9,6 +9,13 @@ const YAML = require('yamljs');
 
 const app = express();
 
+// Behind a reverse proxy (Render, Heroku, nginx...) set TRUST_PROXY=1 so req.ip is the real
+// client address; without it every visitor looks like the proxy and shares one rate-limit key.
+if (process.env.TRUST_PROXY) {
+  const n = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isNaN(n) ? process.env.TRUST_PROXY : n);
+}
+
 // Middleware
 app.use(helmet());
 app.use(cors());
@@ -44,6 +51,7 @@ const riderRoutes = require("./routes/rider.routes");
 const adminRiderRouter = require("./routes/adminRider.routes");
 const chatRoutes = require("./routes/chat.routes");
 const walletRoutes = require("./routes/wallet.routes");
+const customerAccountRoutes = require("./routes/customer.account.routes");
 const complianceRoutes = require('./routes/compliance.routes');
 
 
@@ -60,9 +68,11 @@ app.use("/admin", adminRoutes);
 app.use("/public", publicRoutes);
 
 app.use("/chat", chatRoutes);
+app.use("/api/chat", chatRoutes); // alias: the frontend also calls /api/chat/*
 
 app.use("/orders", ordersRoutes);
 app.use("/customer/auth", customerAuthRoutes);
+app.use("/customer", customerAccountRoutes);
 app.use("/admin/dashboard", adminDashboardRoutes);
 app.use("/auth/rider", riderAuthRoutes);
 app.use("/rider", riderRoutes);

@@ -15,10 +15,20 @@ const vendorAdvertController = require("../controllers/vendor.controller");
 
 const upload        = require("../middlewares/upload.middleware");
 const authMiddleware = require("../middlewares/auth.middleware");
-const requireRole = require("../middlewares/role.middleware")
+const requireRole = require("../middlewares/role.middleware");
+const {
+  requireBusinessOwner,
+  requireSelfParam,
+  requireGalleryImageOwner,
+} = require("../middlewares/ownership.middleware");
 
-// ✅ Protect all vendor routes
+// ✅ Protect all vendor routes: authenticated vendor (owner) accounts only
 router.use(authMiddleware);
+router.use(requireRole("owner", "admin"));
+
+// Any route taking :businessId / :userId must refer to the caller's own resources
+router.param("businessId", (req, res, next) => requireBusinessOwner(req, res, next));
+router.param("userId", (req, res, next) => requireSelfParam(req, res, next));
 
 // ─── Dashboard ───────────────────────────────────────────────
 router.get("/dashboard", vendorController.getVendorDashboard);
@@ -53,17 +63,20 @@ router.post(
 router.get('/status', vendorController.getVendorStatus); // ✅ Fixed
 
 
-router.delete("/gallery/:imageId", vendorController.deleteGalleryImage);
+router.delete("/gallery/:imageId", requireGalleryImageOwner, vendorController.deleteGalleryImage);
 
 router.get( "/:userId/status",     vendorController.getVendorStatus);
 router.post("/:businessId/bank",   vendorController.submitBankDetails);
-router.post("/bank",               vendorController.submitBankDetails);
+router.post("/bank",               requireBusinessOwner, vendorController.submitBankDetails);
 router.get( "/:userId/businesses", vendorController.getVendorBusinesses);
 router.get( "/business/:businessId", vendorController.getBusinessDetail);
 
 // ─── Settings ────────────────────────────────────────────────
 router.get(  "/business/:businessId/settings",             vendorSettingsController.getBusinessSettings);
 router.patch("/business/:businessId/settings",             vendorSettingsController.updateBusinessSettings);
+router.put(  "/business/:businessId/settings",             vendorSettingsController.updateBusinessSettings);
+router.put(  "/business/:businessId/settings/:section",    vendorSettingsController.updateBusinessSettings);
+router.patch("/business/:businessId/settings/:section",    vendorSettingsController.updateBusinessSettings);
 router.post( "/business/:businessId/settings/thumbnail",   upload.single("thumbnail"),  vendorSettingsController.uploadThumbnail);
 router.post( "/business/:businessId/settings/profile-pic", upload.single("profilePic"), vendorSettingsController.uploadProfilePic);
 
@@ -78,6 +91,9 @@ router.get(   "/staff",           vendorStaffController.getStaff);
 router.post(  "/staff",           vendorStaffController.createStaff);
 router.patch( "/staff/:staffId",  vendorStaffController.updateStaff);
 router.delete("/staff/:staffId",  vendorStaffController.deleteStaff);
+
+// ─── Reviews ─────────────────────────────────────────────────
+router.get("/reviews", require("../controllers/review.controller").getVendorReviews);
 
 // ─── Orders ──────────────────────────────────────────────────
 router.get(  "/orders",                    vendorOrdersController.getOrders);

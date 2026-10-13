@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
 const { sendStatusNotificationEmail } = require("../services/emailService");
+const { deliverAndSettle, defaultRiderFee } = require("../services/orderSettlement");
 
 
 /**
@@ -76,7 +77,8 @@ exports.getDashboard = async (req, res) => {
       rawActiveOrder = await prisma.order.findFirst({
         where: {
           status: "ready",
-          riderId: null // Means no rider has claimed it yet
+          riderId: null, // Means no rider has claimed it yet
+          declines: { none: { riderId: userId } } // skip offers this rider declined
         },
         orderBy: { createdAt: "asc" }, // Show oldest available order first
         include: { business: true }
@@ -232,29 +234,65 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ message: "You must go online before accepting orders." });
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id: parseInt(orderId, 10) }
-    });
+    const rider = await prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
+    if (!rider || !["verified", "active"].includes(rider.status)) {
+      return res.status(403).json({ message: "Your rider account has not been approved yet." });
+    }
 
+    const id = parseInt(orderId, 10);
+    const order = await prisma.order.findUnique({ where: { id } });
     if (!order) {
       return res.status(404).json({ message: "Order not found." });
     }
 
-    if (order.riderId) {
-      return res.status(400).json({ message: "This order has already been taken by another rider." });
-    }
-
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
+    // Atomic claim: only one rider can take a ready, unassigned order.
+    const claimed = await prisma.order.updateMany({
+      where: { id, riderId: null, status: "ready" },
       data: {
         riderId: userId,
-        status: "out_for_delivery"
+        status: "out_for_delivery",
+        ...(order.payout > 0 ? {} : { payout: await defaultRiderFee() })
       }
     });
+    if (claimed.count === 0) {
+      return res.status(409).json({ message: "This order is no longer available." });
+    }
+    const updatedOrder = await prisma.order.findUnique({ where: { id } });
 
     res.json({ message: "Order accepted successfully!", order: updatedOrder });
   } catch (error) {
     res.status(500).json({ message: "Failed to accept order", error: error.message });
+  }
+};
+
+/**
+ * Decline a delivery offer (remembered, so it is not offered to this rider again)
+ * Route: POST /rider/orders/:orderId/decline
+ */
+exports.declineOrder = async (req, res) => {
+  try {
+    const riderId = parseInt(req.user.id, 10);
+    const orderId = parseInt(req.params.orderId, 10);
+    if (isNaN(orderId)) {
+      return res.status(400).json({ message: "Invalid order id." });
+    }
+
+    const order = await prisma.order.findUnique({ where: { id: orderId }, select: { id: true, riderId: true } });
+    if (!order) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+    if (order.riderId === riderId) {
+      return res.status(409).json({ message: "You already accepted this order." });
+    }
+
+    await prisma.orderDecline.upsert({
+      where: { orderId_riderId: { orderId, riderId } },
+      update: {},
+      create: { orderId, riderId }
+    });
+    res.json({ success: true, message: "Offer declined." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to decline order", error: error.message });
   }
 };
 
@@ -287,13 +325,12 @@ exports.completeDelivery = async (req, res) => {
       return res.status(400).json({ message: "Cannot complete an order that is not out for delivery." });
     }
 
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: "delivered",
-        updatedAt: new Date() 
-      }
-    });
+    // Marks delivered and credits wallets exactly once.
+    const settled = await deliverAndSettle(order.id, { allowedFrom: ["out_for_delivery"] });
+    if (!settled) {
+      return res.status(409).json({ message: "This delivery was already completed." });
+    }
+    const updatedOrder = await prisma.order.findUnique({ where: { id: order.id } });
 
     res.json({ message: "Delivery completed successfully! Earnings locked.", order: updatedOrder });
   } catch (error) {
@@ -385,12 +422,21 @@ exports.getAllRiders = async (req, res) => {
             plateNumber: true,
             idDocumentUrl: true,
           }
-        }
+        },
+        shiftLogs: { select: { isOnline: true } },
+        _count: { select: { riderOrders: true } }
       },
       orderBy: { createdAt: "desc" }
     });
 
-    res.json(riders);
+    // Flatten the extras so the list screen can show "online now" and delivery counts
+    res.json(
+      riders.map(({ shiftLogs, _count, ...r }) => ({
+        ...r,
+        isOnline: !!shiftLogs?.[0]?.isOnline,
+        deliveryCount: _count.riderOrders,
+      }))
+    );
   } catch (error) {
     res.status(500).json({ message: "Failed to retrieve riders", error: error.message });
   }
@@ -462,6 +508,20 @@ exports.rejectRiderApplication = async (req, res) => {
       return res.status(400).json({ message: "Invalid rider identity target parameter." });
     }
 
+    const target = await prisma.user.findFirst({
+      where: { id: riderId, role: "rider" },
+      select: { status: true, _count: { select: { riderOrders: true } } }
+    });
+    if (!target) {
+      return res.status(404).json({ message: "Rider not found." });
+    }
+    // Only applications still awaiting review can be purged; anyone else keeps their history.
+    if (target.status !== "pending" || target._count.riderOrders > 0) {
+      return res.status(409).json({
+        message: "Only pending applications with no deliveries can be rejected and deleted. Deactivate this rider instead."
+      });
+    }
+
     // Cascades and deletes user along with riderProfile due to schema onDelete: Cascade
     await prisma.user.delete({
       where: { id: riderId }
@@ -470,5 +530,75 @@ exports.rejectRiderApplication = async (req, res) => {
     res.json({ message: "Rider application rejected and account purged successfully." });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete rider registry data record", error: error.message });
+  }
+};
+
+
+/**
+ * Admin Action: Edit a rider's details
+ * Route: PATCH /api/rider/admin/:id
+ */
+exports.updateRiderByAdmin = async (req, res) => {
+  try {
+    const riderId = parseInt(req.params.id, 10);
+    if (isNaN(riderId)) {
+      return res.status(400).json({ message: "Invalid rider identity target parameter." });
+    }
+
+    const { firstName, lastName, phone, vehicleType, plateNumber } = req.body;
+    const rider = await prisma.user.findFirst({ where: { id: riderId, role: "rider" }, select: { id: true } });
+    if (!rider) {
+      return res.status(404).json({ message: "Rider not found." });
+    }
+
+    if (phone) {
+      const taken = await prisma.user.findFirst({ where: { phone, NOT: { id: riderId } }, select: { id: true } });
+      if (taken) return res.status(409).json({ message: "Phone number already in use" });
+    }
+
+    const profileData = {
+      ...(vehicleType != null && { vehicleType }),
+      ...(plateNumber !== undefined && { plateNumber: plateNumber || null }),
+    };
+
+    const updated = await prisma.user.update({
+      where: { id: riderId },
+      data: {
+        ...(firstName != null && { firstName }),
+        ...(lastName != null && { lastName }),
+        ...(phone != null && { phone }),
+        ...(Object.keys(profileData).length && {
+          riderProfile: {
+            upsert: {
+              update: profileData,
+              create: { vehicleType: vehicleType || "motorcycle", idDocumentUrl: "ADMIN_CREATED", ...profileData },
+            },
+          },
+        }),
+      },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, phone: true, status: true,
+        riderProfile: { select: { vehicleType: true, plateNumber: true, idDocumentUrl: true } },
+      },
+    });
+
+    res.json({ message: "Rider updated successfully.", rider: updated });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update rider", error: error.message });
+  }
+};
+
+/**
+ * Rider operations alerts (shared by /rider/operations-alerts and /chat/operations-alerts)
+ */
+exports.getOperationsAlerts = async (req, res) => {
+  try {
+    const alerts = await prisma.riderAlert.findMany({
+      where: { riderId: req.user.id },
+      orderBy: { createdAt: "desc" }
+    });
+    return res.json({ success: true, data: alerts });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

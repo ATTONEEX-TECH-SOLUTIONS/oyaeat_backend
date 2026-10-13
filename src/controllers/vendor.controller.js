@@ -350,7 +350,12 @@ const getBusinessDetail = async (req, res) => {
     const { businessId } = req.params;
     const business = await prisma.business.findUnique({
       where: { id: parseInt(businessId) },
-      include: { documents: true, bankDetail: true, owner: true, galleryImages: true },
+      include: {
+        documents: true,
+        bankDetail: true,
+        owner: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        galleryImages: true,
+      },
     });
 
     if (!business) {

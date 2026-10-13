@@ -340,13 +340,20 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
+    const existing = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!existing || existing.customerId !== req.user.id) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+    if (Math.round(existing.total * 100) !== Number(tx.amount)) {
+      return res.status(400).json({ success: false, message: "Paid amount does not match order total" });
+    }
+
     const order = await prisma.order.update({
       where: { id: orderId },
       data: {
         paymentStatus: "paid",
         paymentReference: tx.reference,
         paymentChannel: tx.channel || null,
-        status: "confirmed",
         paidAt: new Date(),
       },
       include: {
@@ -388,6 +395,15 @@ exports.getMyOrders = async (req, res) => {
           }
         },
         business: { select: { id: true, name: true } },
+        review: { select: { rating: true, comment: true } },
+        rider: {
+          select: {
+            firstName: true,
+            lastName: true,
+            phone: true,
+            riderProfile: { select: { vehicleType: true, plateNumber: true } },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -458,8 +474,27 @@ exports.dispatchOrderToRiders = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order record not found" });
     }
 
+    if (String(req.user.role).toLowerCase() !== "admin") {
+      const biz = await prisma.business.findUnique({ where: { id: order.businessId }, select: { ownerId: true } });
+      if (!biz || biz.ownerId !== req.user.id) {
+        return res.status(403).json({ success: false, message: "Forbidden: this order belongs to another restaurant" });
+      }
+    }
+
+    if (order.riderId || order.status !== "ready") {
+      return res.status(409).json({
+        success: false,
+        message: "Only a ready, unassigned order can be dispatched",
+        notifiedRidersCount: 0
+      });
+    }
+
     // Identify nearby riders located inside a 5km operational ring
-    const eligibleRiders = await findNearbyAvailableRiders(order.businessId, 5.0);
+    const nearby = await findNearbyAvailableRiders(order.businessId, 5.0);
+    const declined = new Set(
+      (await prisma.orderDecline.findMany({ where: { orderId }, select: { riderId: true } })).map((d) => d.riderId)
+    );
+    const eligibleRiders = nearby.filter((r) => !declined.has(r.riderId));
 
     // ── NEW LIVE SOCKET BROADCAST LOOPS ──
     const ioInstance = getIO();
@@ -503,6 +538,7 @@ exports.getCustomerRiderTracking = async (req, res) => {
       select: {
         status: true,
         riderId: true,
+        customerId: true,
         rider: {
           select: {
             firstName: true,
@@ -515,7 +551,11 @@ exports.getCustomerRiderTracking = async (req, res) => {
       }
     });
 
-    if (!order || !order.riderId || !order.rider.shiftLogs[0]) {
+    if (!order || order.customerId !== req.user.id) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (!order.riderId || !order.rider.shiftLogs[0]) {
       return res.status(200).json({ message: "No active rider assigned yet or tracking is offline." });
     }
 
@@ -531,5 +571,37 @@ exports.getCustomerRiderTracking = async (req, res) => {
   } catch (error) {
     console.error("Customer position tracker query error:", error);
     return res.status(500).json({ message: "Failed to pull rider tracking updates", error: error.message });
+  }
+};
+
+
+// POST /orders/:id/cancel  (customer, only before the restaurant starts preparing)
+exports.cancelMyOrder = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+  try {
+    const result = await prisma.order.updateMany({
+      where: { id: orderId, customerId: req.user.id, status: "pending" },
+      data: { status: "cancelled" },
+    });
+
+    if (result.count === 0) {
+      const existing = await prisma.order.findFirst({ where: { id: orderId, customerId: req.user.id }, select: { status: true } });
+      if (!existing) return res.status(404).json({ success: false, message: "Order not found" });
+      return res.status(409).json({
+        success: false,
+        message: `Order can no longer be cancelled (status: ${existing.status})`,
+      });
+    }
+
+    // Online payments need a manual refund; flag it so support/admin can find it.
+    await prisma.order.updateMany({
+      where: { id: orderId, paymentStatus: "paid" },
+      data: { paymentStatus: "refund_pending" },
+    });
+
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+    res.json({ success: true, message: "Order cancelled", data: { order } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "Failed to cancel order", error: e.message });
   }
 };

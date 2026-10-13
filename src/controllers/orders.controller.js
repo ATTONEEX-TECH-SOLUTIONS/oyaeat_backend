@@ -340,13 +340,20 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
+    const existing = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!existing || existing.customerId !== req.user.id) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+    if (Math.round(existing.total * 100) !== Number(tx.amount)) {
+      return res.status(400).json({ success: false, message: "Paid amount does not match order total" });
+    }
+
     const order = await prisma.order.update({
       where: { id: orderId },
       data: {
         paymentStatus: "paid",
         paymentReference: tx.reference,
         paymentChannel: tx.channel || null,
-        status: "confirmed",
         paidAt: new Date(),
       },
       include: {
@@ -458,6 +465,21 @@ exports.dispatchOrderToRiders = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order record not found" });
     }
 
+    if (String(req.user.role).toLowerCase() !== "admin") {
+      const biz = await prisma.business.findUnique({ where: { id: order.businessId }, select: { ownerId: true } });
+      if (!biz || biz.ownerId !== req.user.id) {
+        return res.status(403).json({ success: false, message: "Forbidden: this order belongs to another restaurant" });
+      }
+    }
+
+    if (order.riderId || order.status !== "ready") {
+      return res.status(409).json({
+        success: false,
+        message: "Only a ready, unassigned order can be dispatched",
+        notifiedRidersCount: 0
+      });
+    }
+
     // Identify nearby riders located inside a 5km operational ring
     const eligibleRiders = await findNearbyAvailableRiders(order.businessId, 5.0);
 
@@ -503,6 +525,7 @@ exports.getCustomerRiderTracking = async (req, res) => {
       select: {
         status: true,
         riderId: true,
+        customerId: true,
         rider: {
           select: {
             firstName: true,
@@ -515,7 +538,11 @@ exports.getCustomerRiderTracking = async (req, res) => {
       }
     });
 
-    if (!order || !order.riderId || !order.rider.shiftLogs[0]) {
+    if (!order || order.customerId !== req.user.id) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (!order.riderId || !order.rider.shiftLogs[0]) {
       return res.status(200).json({ message: "No active rider assigned yet or tracking is offline." });
     }
 

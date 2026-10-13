@@ -290,11 +290,17 @@ exports.approveVendorPromo = async (req, res) => {
     const updatedExpirationDate = new Date();
     updatedExpirationDate.setHours(updatedExpirationDate.getHours() + 24);
 
+    // The review desk lets admins tidy the wording before approving
+    const title = typeof req.body?.title === "string" ? req.body.title.trim().slice(0, 120) : "";
+    const desc = typeof req.body?.desc === "string" ? req.body.desc.trim().slice(0, 300) : undefined;
+
     const approvedPromo = await prisma.promo.update({
       where: { id: promoId },
       data: {
         isActive: true,
-        expiresAt: updatedExpirationDate
+        expiresAt: updatedExpirationDate,
+        ...(title && { title }),
+        ...(desc !== undefined && { desc })
       }
     });
 
@@ -319,6 +325,7 @@ exports.approveVendorPromo = async (req, res) => {
 exports.rejectVendorPromo = async (req, res) => {
   try {
     const promoId = parseInt(req.params.id, 10);
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 300) : "";
 
     const rejectedPromo = await prisma.promo.update({
       where: { id: promoId },
@@ -333,7 +340,7 @@ exports.rejectVendorPromo = async (req, res) => {
       data: {
         businessId: rejectedPromo.businessId,
         title: "❌ Campaign Request Rejected",
-        text: `Your advertisement submission "${rejectedPromo.title}" did not pass administrative review and was rejected.`
+        text: `Your advertisement submission "${rejectedPromo.title}" did not pass administrative review and was rejected.${reason ? ` Reason: ${reason}` : ""}`
       }
     });
 

@@ -560,3 +560,35 @@ exports.getCustomerRiderTracking = async (req, res) => {
     return res.status(500).json({ message: "Failed to pull rider tracking updates", error: error.message });
   }
 };
+
+
+// POST /orders/:id/cancel  (customer, only before the restaurant starts preparing)
+exports.cancelMyOrder = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+  try {
+    const result = await prisma.order.updateMany({
+      where: { id: orderId, customerId: req.user.id, status: "pending" },
+      data: { status: "cancelled" },
+    });
+
+    if (result.count === 0) {
+      const existing = await prisma.order.findFirst({ where: { id: orderId, customerId: req.user.id }, select: { status: true } });
+      if (!existing) return res.status(404).json({ success: false, message: "Order not found" });
+      return res.status(409).json({
+        success: false,
+        message: `Order can no longer be cancelled (status: ${existing.status})`,
+      });
+    }
+
+    // Online payments need a manual refund; flag it so support/admin can find it.
+    await prisma.order.updateMany({
+      where: { id: orderId, paymentStatus: "paid" },
+      data: { paymentStatus: "refund_pending" },
+    });
+
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+    res.json({ success: true, message: "Order cancelled", data: { order } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "Failed to cancel order", error: e.message });
+  }
+};

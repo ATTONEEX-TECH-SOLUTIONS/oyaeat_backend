@@ -12,6 +12,7 @@ router.post("/", requireRole("customer"), ordersController.createOrder);
 router.get("/my", requireRole("customer"), ordersController.getMyOrders);
 router.post("/initialize-payment", requireRole("customer"), ordersController.initializePayment);
 router.get("/verify-payment/:reference", requireRole("customer"), ordersController.verifyPayment);
+router.post("/:id/cancel", requireRole("customer"), ordersController.cancelMyOrder);
 router.get("/:id/track-rider", requireRole("customer"), ordersController.getCustomerRiderTracking);
 
 // ── Vendor route: the restaurant dispatches its own ready order to riders ──

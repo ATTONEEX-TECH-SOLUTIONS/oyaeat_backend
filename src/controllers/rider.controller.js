@@ -422,12 +422,21 @@ exports.getAllRiders = async (req, res) => {
             plateNumber: true,
             idDocumentUrl: true,
           }
-        }
+        },
+        shiftLogs: { select: { isOnline: true } },
+        _count: { select: { riderOrders: true } }
       },
       orderBy: { createdAt: "desc" }
     });
 
-    res.json(riders);
+    // Flatten the extras so the list screen can show "online now" and delivery counts
+    res.json(
+      riders.map(({ shiftLogs, _count, ...r }) => ({
+        ...r,
+        isOnline: !!shiftLogs?.[0]?.isOnline,
+        deliveryCount: _count.riderOrders,
+      }))
+    );
   } catch (error) {
     res.status(500).json({ message: "Failed to retrieve riders", error: error.message });
   }
@@ -497,6 +506,20 @@ exports.rejectRiderApplication = async (req, res) => {
 
     if (isNaN(riderId)) {
       return res.status(400).json({ message: "Invalid rider identity target parameter." });
+    }
+
+    const target = await prisma.user.findFirst({
+      where: { id: riderId, role: "rider" },
+      select: { status: true, _count: { select: { riderOrders: true } } }
+    });
+    if (!target) {
+      return res.status(404).json({ message: "Rider not found." });
+    }
+    // Only applications still awaiting review can be purged; anyone else keeps their history.
+    if (target.status !== "pending" || target._count.riderOrders > 0) {
+      return res.status(409).json({
+        message: "Only pending applications with no deliveries can be rejected and deleted. Deactivate this rider instead."
+      });
     }
 
     // Cascades and deletes user along with riderProfile due to schema onDelete: Cascade

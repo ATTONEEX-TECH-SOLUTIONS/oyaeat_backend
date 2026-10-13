@@ -48,7 +48,7 @@ async function listFor(businessId, req, res) {
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
 
-  const [reviews, agg] = await Promise.all([
+  const [reviews, agg, groups] = await Promise.all([
     prisma.review.findMany({
       where: { businessId },
       orderBy: { createdAt: "desc" },
@@ -57,17 +57,25 @@ async function listFor(businessId, req, res) {
       include: { customer: { select: { firstName: true, lastName: true } } },
     }),
     prisma.review.aggregate({ where: { businessId }, _avg: { rating: true }, _count: { rating: true } }),
+    prisma.review.groupBy({ by: ["rating"], where: { businessId }, _count: { rating: true } }),
   ]);
 
   const total = agg._count.rating;
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  groups.forEach((g) => { distribution[g.rating] = g._count.rating; });
+  const pagination = { total, page, limit, totalPages: Math.ceil(total / limit) };
+
   res.json({
     success: true,
     data: {
       reviews: reviews.map(shape),
-      averageRating: total ? Math.round(agg._avg.rating * 10) / 10 : null,
+      averageRating: total ? Math.round(agg._avg.rating * 10) / 10 : 0,
       reviewCount: total,
-      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      totalReviews: total,
+      distribution,
+      pagination,
     },
+    pagination,
   });
 }
 

@@ -395,6 +395,15 @@ exports.getMyOrders = async (req, res) => {
           }
         },
         business: { select: { id: true, name: true } },
+        review: { select: { rating: true, comment: true } },
+        rider: {
+          select: {
+            firstName: true,
+            lastName: true,
+            phone: true,
+            riderProfile: { select: { vehicleType: true, plateNumber: true } },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     });

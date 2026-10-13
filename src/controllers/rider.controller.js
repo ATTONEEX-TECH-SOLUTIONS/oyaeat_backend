@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
 const { sendStatusNotificationEmail } = require("../services/emailService");
+const { deliverAndSettle, defaultRiderFee } = require("../services/orderSettlement");
 
 
 /**
@@ -232,25 +233,30 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ message: "You must go online before accepting orders." });
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id: parseInt(orderId, 10) }
-    });
+    const rider = await prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
+    if (!rider || !["verified", "active"].includes(rider.status)) {
+      return res.status(403).json({ message: "Your rider account has not been approved yet." });
+    }
 
+    const id = parseInt(orderId, 10);
+    const order = await prisma.order.findUnique({ where: { id } });
     if (!order) {
       return res.status(404).json({ message: "Order not found." });
     }
 
-    if (order.riderId) {
-      return res.status(400).json({ message: "This order has already been taken by another rider." });
-    }
-
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
+    // Atomic claim: only one rider can take a ready, unassigned order.
+    const claimed = await prisma.order.updateMany({
+      where: { id, riderId: null, status: "ready" },
       data: {
         riderId: userId,
-        status: "out_for_delivery"
+        status: "out_for_delivery",
+        ...(order.payout > 0 ? {} : { payout: await defaultRiderFee() })
       }
     });
+    if (claimed.count === 0) {
+      return res.status(409).json({ message: "This order is no longer available." });
+    }
+    const updatedOrder = await prisma.order.findUnique({ where: { id } });
 
     res.json({ message: "Order accepted successfully!", order: updatedOrder });
   } catch (error) {
@@ -287,13 +293,12 @@ exports.completeDelivery = async (req, res) => {
       return res.status(400).json({ message: "Cannot complete an order that is not out for delivery." });
     }
 
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: "delivered",
-        updatedAt: new Date() 
-      }
-    });
+    // Marks delivered and credits wallets exactly once.
+    const settled = await deliverAndSettle(order.id, { allowedFrom: ["out_for_delivery"] });
+    if (!settled) {
+      return res.status(409).json({ message: "This delivery was already completed." });
+    }
+    const updatedOrder = await prisma.order.findUnique({ where: { id: order.id } });
 
     res.json({ message: "Delivery completed successfully! Earnings locked.", order: updatedOrder });
   } catch (error) {

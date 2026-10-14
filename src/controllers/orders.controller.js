@@ -1,8 +1,7 @@
 const crypto = require("crypto");
 const prisma = require("../lib/prisma");
-const { markOrderPaid } = require("../services/payments");
+const { markOrderPaid, initializeTransaction, PaystackUnreachableError } = require("../services/payments");
 const { getIO } = require("../socket/init");
-const paystack = require('paystack-api')(process.env.PAYSTACK_SECRET_KEY); 
 
 // Small helper to validate cart and calculate total securely from DB
 async function validateOrderInput({ businessId, items }) {
@@ -218,12 +217,17 @@ exports.initializePayment = async (req, res) => {
 
     const reference = `order_${order.id}_${Date.now()}`;
 
-    // ── FIXED PIPELINE: Native SDK handles Cloudflare headers automatically ──
+    // If Paystack cannot be reached or refuses, do not leave an unpaid ghost order behind.
+    const abandonOrder = () =>
+      prisma.order
+        .update({ where: { id: order.id }, data: { status: "cancelled", paymentStatus: "failed" } })
+        .catch(() => {});
+
     let paystackData;
     try {
-      const paystackResponse = await paystack.transaction.initialize({
+      paystackData = await initializeTransaction({
         email,
-        amount: Math.round(total * 100), // Converted cleanly to kobo matching Paystack configurations
+        amount: Math.round(total * 100), // kobo
         reference,
         currency: "NGN",
         callback_url: callbackUrl || undefined,
@@ -234,23 +238,23 @@ exports.initializePayment = async (req, res) => {
           businessId: bizId,
           customerName,
           customerLatitude: req.body.customerLatitude || null,
-          customerLongitude: req.body.customerLongitude || null
+          customerLongitude: req.body.customerLongitude || null,
         },
       });
-
-      paystackData = paystackResponse;
     } catch (paystackError) {
-      console.error("Paystack SDK communication fault:", paystackError.message);
-      return res.status(400).json({
+      await abandonOrder();
+      const unreachable = paystackError instanceof PaystackUnreachableError;
+      return res.status(unreachable ? 502 : 500).json({
         success: false,
-        message: paystackError.message || "Failed to initialize payment transaction window.",
+        message: unreachable ? paystackError.message : "Failed to initialize payment transaction window.",
       });
     }
 
-    if (!paystackData.status) {
+    if (!paystackData?.status) {
+      await abandonOrder();
       return res.status(400).json({
         success: false,
-        message: paystackData.message || "Failed to initialize payment transaction window.",
+        message: paystackData?.message || "Failed to initialize payment transaction window.",
       });
     }
 
@@ -314,11 +318,24 @@ exports.verifyPayment = async (req, res) => {
       return res.json({ success: true, data: { order: existing, status: "success", reference } });
     }
 
-    const verifyResponse = await fetch(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-      { method: "GET", headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
-    );
-    const verifyData = await verifyResponse.json();
+    let verifyData;
+    try {
+      const verifyResponse = await fetch(
+        `${process.env.PAYSTACK_BASE_URL || "https://api.paystack.co"}/transaction/verify/${encodeURIComponent(reference)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      verifyData = await verifyResponse.json();
+    } catch (netErr) {
+      console.error("Paystack verify failed:", netErr.cause?.message || netErr.message);
+      return res.status(502).json({
+        success: false,
+        message: "We couldn't reach Paystack to confirm your payment. Try again in a moment.",
+      });
+    }
 
     if (!verifyData.status) {
       return res.status(400).json({ success: false, message: verifyData.message || "Verification failed" });

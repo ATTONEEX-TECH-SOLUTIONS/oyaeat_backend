@@ -369,6 +369,83 @@ const getBusinessDetail = async (req, res) => {
 };
 
 
+
+// ── DASHBOARD NUMBERS ────────────────────────────────────────────
+// A "sale" is an order the restaurant has accepted and not cancelled: preparing,
+// ready, out for delivery or delivered. Pending orders are not sales yet, cancelled
+// ones never are. Online-payment orders only reach the kitchen once paid, so
+// everything counted here is paid or cash. "Today" and the daily chart use the
+// business timezone (Lagos, UTC+1 by default; override with BUSINESS_TZ_OFFSET_MIN).
+const SALE_STATUSES = ["preparing", "ready", "out_for_delivery", "delivered"];
+const ACTIVE_STATUSES = ["pending", "preparing", "ready", "out_for_delivery"];
+const TZ_OFFSET_MIN = Number.isFinite(Number(process.env.BUSINESS_TZ_OFFSET_MIN))
+  ? Number(process.env.BUSINESS_TZ_OFFSET_MIN)
+  : 60;
+
+const visibleToKitchen = {
+  OR: [{ paymentMethod: null }, { paymentMethod: { not: "paystack" } }, { paymentStatus: "paid" }],
+};
+
+// "YYYY-MM-DD" of an instant, in the business timezone
+const dayKey = (d) => new Date(d.getTime() + TZ_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+
+async function computeDashboardStats(businessId) {
+  const base = { businessId, ...visibleToKitchen };
+  const now = new Date();
+  const todayKey = dayKey(now);
+
+  // start (UTC instant) of the business day 6 days ago
+  const startOfToday = new Date(Date.parse(`${todayKey}T00:00:00Z`) - TZ_OFFSET_MIN * 60000);
+  const weekStart = new Date(startOfToday.getTime() - 6 * 86400000);
+
+  const [allTime, today, totalOrders, activeOrders, customers, weekOrders, recent, rating, delivered] =
+    await Promise.all([
+      prisma.order.aggregate({ where: { ...base, status: { in: SALE_STATUSES } }, _sum: { total: true }, _count: { _all: true } }),
+      prisma.order.aggregate({ where: { ...base, status: { in: SALE_STATUSES }, createdAt: { gte: startOfToday } }, _sum: { total: true } }),
+      prisma.order.count({ where: { ...base, status: { not: "cancelled" } } }),
+      prisma.order.count({ where: { ...base, status: { in: ACTIVE_STATUSES } } }),
+      prisma.order.findMany({ where: { ...base, status: { in: SALE_STATUSES }, customerId: { not: null } }, distinct: ["customerId"], select: { customerId: true } }),
+      prisma.order.findMany({ where: { ...base, status: { in: SALE_STATUSES }, createdAt: { gte: weekStart } }, select: { createdAt: true, total: true } }),
+      prisma.order.findMany({ where: base, orderBy: { createdAt: "desc" }, take: 5, include: { items: true } }),
+      prisma.review.aggregate({ where: { businessId }, _avg: { rating: true } }),
+      prisma.order.findMany({ where: { ...base, status: "delivered" }, orderBy: { updatedAt: "desc" }, take: 30, select: { createdAt: true, updatedAt: true } }),
+    ]);
+
+  const totalSales = allTime._sum.total || 0;
+  const saleCount = allTime._count._all;
+
+  // 7 daily buckets, oldest first, zero-filled
+  const buckets = new Map();
+  for (let i = 6; i >= 0; i--) {
+    buckets.set(dayKey(new Date(startOfToday.getTime() - i * 86400000 + 12 * 3600000)), { revenue: 0, orders: 0 });
+  }
+  for (const o of weekOrders) {
+    const b = buckets.get(dayKey(o.createdAt));
+    if (b) { b.revenue += o.total; b.orders += 1; }
+  }
+
+  // No delivery timestamp is stored, so use "last updated - placed" and ignore anything over
+  // 3 hours (an order touched again later, e.g. a refund flag, would otherwise skew it).
+  const durations = delivered.map((o) => (o.updatedAt - o.createdAt) / 60000).filter((m) => m > 0 && m <= 180);
+  const avgDeliveryMins = durations.length ? Math.round(durations.reduce((n, m) => n + m, 0) / durations.length) : 0;
+
+  return {
+    summary: {
+      totalSales,
+      totalOrders,
+      revenueToday: today._sum.total || 0,
+      activeOrders,
+      totalCustomers: customers.length,
+      avgOrderValue: saleCount ? Math.round(totalSales / saleCount) : 0,
+      avgDeliveryTimeMins: avgDeliveryMins, // order placed -> delivered; prep time is not tracked
+      customerRating: rating._avg.rating ? Math.round(rating._avg.rating * 10) / 10 : 0,
+      avgPrepTimeMins: 0, // not tracked yet
+    },
+    recentOrders: recent,
+    salesSeries: [...buckets].map(([date, v]) => ({ date, revenue: v.revenue, orders: v.orders })),
+  };
+}
+
 // Replace your getVendorDashboard function with this updated code:
 const getVendorDashboard = async (req, res) => {
   try {
@@ -403,30 +480,21 @@ const getVendorDashboard = async (req, res) => {
 
     const hasDocumentsUploaded = business.hasDocuments || (Array.isArray(business.documents) && business.documents.length > 0);
     const hasBankLinked = business.hasBankDetails || business.bankDetail !== null;
-// Replace the response block in your backend's getVendorDashboard controller:
-res.json({
-  success: true,
-  dashboard: {
-    business: {
-      ...business,
-      hasDocuments: hasDocumentsUploaded,
-      hasBankDetails: hasBankLinked
-    },
-    summary: { 
-      totalSales: 0, 
-      totalOrders: 0,
-      revenueToday: 0,
-      activeOrders: 0,
-      totalCustomers: 0,
-      avgOrderValue: 0,
-      avgDeliveryTimeMins: 0,
-      customerRating: 0,
-      avgPrepTimeMins: 0
-    },
-    recentOrders: [],
-    salesSeries: [],
-  }
-});
+    const stats = await computeDashboardStats(business.id);
+
+    const dashboard = {
+      business: {
+        ...business,
+        hasDocuments: hasDocumentsUploaded,
+        hasBankDetails: hasBankLinked,
+      },
+      summary: stats.summary,
+      recentOrders: stats.recentOrders,
+      salesSeries: stats.salesSeries,
+    };
+
+    // `dashboard` at the top level for older callers; `data.dashboard` is what the vendor app reads
+    res.json({ success: true, dashboard, data: { dashboard } });
 
   } catch (error) {
     res.status(500).json({ success: false, message: "Dashboard error", error: error.message });

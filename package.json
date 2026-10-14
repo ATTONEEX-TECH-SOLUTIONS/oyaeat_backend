@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "predev": "prisma generate",
     "dev": "nodemon index.js",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate deploy && prisma generate",
     "seed:admin": "node src/scripts/seed-admin.js"
   },
   "keywords": [],

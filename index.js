@@ -1,3 +1,6 @@
+// Prefer IPv4 when resolving hosts: some networks drop IPv6 TLS connections (seen with api.paystack.co)
+require("dns").setDefaultResultOrder("ipv4first");
+
 const http = require("http");
 const app = require("./src/app");
 const { initSocket } = require("./src/socket/init");

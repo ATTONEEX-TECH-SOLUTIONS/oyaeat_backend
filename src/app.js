@@ -9,11 +9,19 @@ const YAML = require('yamljs');
 
 const app = express();
 
+// Behind a reverse proxy (Render, Heroku, nginx...) set TRUST_PROXY=1 so req.ip is the real
+// client address; without it every visitor looks like the proxy and shares one rate-limit key.
+if (process.env.TRUST_PROXY) {
+  const n = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isNaN(n) ? process.env.TRUST_PROXY : n);
+}
+
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
-app.use(express.json());
+// keep the raw bytes: Paystack signs the exact body it sends
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/uploads', express.static('uploads'));
@@ -50,6 +58,9 @@ const complianceRoutes = require('./routes/compliance.routes');
 
 
 
+
+// Paystack calls this when a payment succeeds, even if the customer closed the tab
+app.post("/webhooks/paystack", require("./controllers/orders.controller").paystackWebhook);
 
 // Mount routes
 app.use("/auth", authRoutes);

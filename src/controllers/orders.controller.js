@@ -1,4 +1,6 @@
+const crypto = require("crypto");
 const prisma = require("../lib/prisma");
+const { markOrderPaid } = require("../services/payments");
 const { getIO } = require("../socket/init");
 const paystack = require('paystack-api')(process.env.PAYSTACK_SECRET_KEY); 
 
@@ -291,91 +293,84 @@ exports.initializePayment = async (req, res) => {
 };
 
 // GET /orders/verify-payment/:reference
+// Called by the customer app when they come back from Paystack. Idempotent.
 exports.verifyPayment = async (req, res) => {
   try {
     const { reference } = req.params;
-
     if (!reference) {
-      return res.status(400).json({
-        success: false,
-        message: "reference is required",
-      });
+      return res.status(400).json({ success: false, message: "reference is required" });
+    }
+
+    // Look the order up by the reference we stored when the payment was started,
+    // limited to this customer, rather than trusting what Paystack echoes back.
+    const existing = await prisma.order.findFirst({
+      where: { paymentReference: reference, customerId: req.user.id },
+      include: { items: true, business: { select: { id: true, name: true } } },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Order not found for this payment" });
+    }
+    if (existing.paymentStatus === "paid") {
+      return res.json({ success: true, data: { order: existing, status: "success", reference } });
     }
 
     const verifyResponse = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+      { method: "GET", headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
     );
-
     const verifyData = await verifyResponse.json();
 
     if (!verifyData.status) {
-      return res.status(400).json({
-        success: false,
-        message: verifyData.message || "Verification failed",
-      });
+      return res.status(400).json({ success: false, message: verifyData.message || "Verification failed" });
     }
 
     const tx = verifyData.data;
-
     if (tx.status !== "success") {
       return res.status(400).json({
         success: false,
-        message: `Payment not successful: ${tx.status}`,
-        data: tx,
+        message: `Payment not completed yet (${tx.status})`,
+        data: { status: tx.status },
       });
     }
 
-    const orderId = Number(tx.metadata?.orderId);
-
-    if (!orderId) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing orderId in payment metadata",
-      });
+    const order = await markOrderPaid(existing.id, tx);
+    if (!order) {
+      return res.status(400).json({ success: false, message: "Paid amount does not match the order total" });
     }
-
-    const existing = await prisma.order.findUnique({ where: { id: orderId } });
-    if (!existing || existing.customerId !== req.user.id) {
-      return res.status(404).json({ success: false, message: "Order not found" });
-    }
-    if (Math.round(existing.total * 100) !== Number(tx.amount)) {
-      return res.status(400).json({ success: false, message: "Paid amount does not match order total" });
-    }
-
-    const order = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: "paid",
-        paymentReference: tx.reference,
-        paymentChannel: tx.channel || null,
-        paidAt: new Date(),
-      },
-      include: {
-        items: true,
-        business: { select: { id: true, name: true } },
-      },
-    });
 
     return res.json({
       success: true,
-      data: {
-        order,
-        status: tx.status,
-        reference: tx.reference,
-        channel: tx.channel || null,
-        amount: tx.amount,
-      },
+      data: { order, status: tx.status, reference: tx.reference, channel: tx.channel || null, amount: tx.amount },
     });
   } catch (e) {
-    return res
-      .status(500)
-      .json({ success: false, message: "Unable to verify payment", error: e.message });
+    return res.status(500).json({ success: false, message: "Unable to verify payment", error: e.message });
+  }
+};
+
+// POST /webhooks/paystack  (no login: Paystack calls this; the signature proves it is them)
+exports.paystackWebhook = async (req, res) => {
+  try {
+    const signature = req.headers["x-paystack-signature"];
+    const expected = crypto
+      .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY || "")
+      .update(req.rawBody || Buffer.from(""))
+      .digest("hex");
+    const sigOk =
+      typeof signature === "string" &&
+      signature.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    if (!sigOk) return res.status(401).json({ success: false, message: "Invalid signature" });
+
+    const event = req.body;
+    if (event?.event === "charge.success") {
+      const tx = event.data || {};
+      const order = await prisma.order.findFirst({ where: { paymentReference: tx.reference } });
+      if (order) await markOrderPaid(order.id, tx);
+    }
+    // Always acknowledge a correctly signed call so Paystack stops retrying.
+    return res.sendStatus(200);
+  } catch (e) {
+    return res.status(500).json({ success: false, message: e.message });
   }
 };
 
@@ -395,6 +390,15 @@ exports.getMyOrders = async (req, res) => {
           }
         },
         business: { select: { id: true, name: true } },
+        review: { select: { rating: true, comment: true } },
+        rider: {
+          select: {
+            firstName: true,
+            lastName: true,
+            phone: true,
+            riderProfile: { select: { vehicleType: true, plateNumber: true } },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     });

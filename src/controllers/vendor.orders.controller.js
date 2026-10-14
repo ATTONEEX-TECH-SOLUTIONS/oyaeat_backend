@@ -27,7 +27,11 @@ exports.getOrders = async (req, res) => {
     const { status, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where = { businessId: business.id };
+    // Online-payment orders only reach the kitchen once the payment is confirmed.
+    const where = {
+      businessId: business.id,
+      OR: [{ paymentMethod: null }, { paymentMethod: { not: "paystack" } }, { paymentStatus: "paid" }],
+    };
     if (status) where.status = status;
 
     const [orders, total] = await Promise.all([

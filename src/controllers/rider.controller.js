@@ -112,7 +112,9 @@ exports.getDashboard = async (req, res) => {
         // FIX 2: Updates nested profile status for UI component compatibility
         status: (user.status === "verified" || user.status === "active") ? "active" : user.status, 
         
-        vehicleType: user.riderProfile?.vehicleType || "Motorcycle"
+        vehicleType: user.riderProfile?.vehicleType || "Motorcycle",
+        avatarUrl: user.avatarUrl || null,
+        isVerified: !!user.riderProfile?.isVerified
       },
       stats: {
         todayEarnings: `₦${totalEarningsToday.toLocaleString()}`,
@@ -351,21 +353,22 @@ exports.updateRiderProfile = async (req, res) => {
       return res.status(400).json({ message: "Invalid user identity format" });
     }
 
-    const updateData = {
-      firstName,
-      lastName,
-      phone,
-      riderProfile: {
-        update: {
-          vehicleType,
-          plateNumber: plateNumber || null
-        }
-      }
+    const profileData = {
+      ...(vehicleType ? { vehicleType: String(vehicleType).toLowerCase() } : {}),
+      ...(plateNumber !== undefined ? { plateNumber: plateNumber || null } : {}),
     };
 
-    // If avatar profile image path is sent from multer middleware
+    const updateData = {
+      ...(firstName ? { firstName } : {}),
+      ...(lastName ? { lastName } : {}),
+      ...(phone ? { phone } : {}),
+      ...(Object.keys(profileData).length ? { riderProfile: { update: profileData } } : {}),
+    };
+
+    // Profile picture: with Cloudinary storage `path` is the hosted https URL
+    // (`filename` is only its public id).
     if (req.file) {
-      updateData.avatarUrl = `/uploads/${req.file.filename}`;
+      updateData.avatarUrl = req.file.path;
     }
 
     if (phone) {

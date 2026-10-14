@@ -59,6 +59,7 @@ model User {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   status        UserStatus @default(pending)
+  avatarUrl     String?
 
   businesses         Business[]
   phoneVerifications PhoneVerification[]

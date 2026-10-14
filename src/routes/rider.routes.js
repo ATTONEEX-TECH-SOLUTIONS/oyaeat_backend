@@ -36,7 +36,7 @@ router.post("/support/message", supportController.sendSupportMessage);
 
 router.get("/earnings/summary", earningsController.getRiderEarnings);
 
-router.put("/profile/update", upload.single("avatar"), riderController.updateRiderProfile);
+router.put("/profile/update", upload.avatar.single("avatar"), riderController.updateRiderProfile);
 
 router.get("/operations-alerts", riderController.getOperationsAlerts);
 

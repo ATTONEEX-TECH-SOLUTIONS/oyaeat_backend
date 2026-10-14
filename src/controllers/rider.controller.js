@@ -399,7 +399,12 @@ exports.updateRiderProfile = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to update profile", error: error.message });
+    // Full detail goes to the server log; the client only gets a short message
+    // (Prisma errors can be thousands of characters long).
+    console.error("updateRiderProfile failed:", error);
+    res.status(500).json({
+      message: "We couldn't save your profile. Please try again, and contact support if it keeps happening.",
+    });
   }
 };
 

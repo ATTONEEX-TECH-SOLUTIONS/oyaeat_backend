@@ -100,6 +100,7 @@ router.put("/settings", settingsController.updateSystemSettings);
 // ─── Restaurant payment accounts (Paystack subaccounts) ───────
 const paymentAccount = require("../controllers/paymentAccount.controller");
 router.get("/banks", paymentAccount.listBanks);
+router.get("/payment-accounts", paymentAccount.listPaymentAccounts);
 router.post("/payment-accounts/resolve", paymentAccount.resolveAccount);
 router.get("/businesses/:businessId/payment-account", paymentAccount.getPaymentAccount);
 router.put("/businesses/:businessId/payment-account", paymentAccount.setPaymentAccount);

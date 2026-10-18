@@ -20,6 +20,33 @@ const publicView = (bank) =>
     active: bank.subaccountActive,
   };
 
+// GET /admin/payment-accounts — approved restaurants with their payment-account status
+exports.listPaymentAccounts = async (req, res) => {
+  try {
+    const businesses = await prisma.business.findMany({
+      where: { status: "approved" },
+      select: { id: true, name: true, city: true, businessEmail: true, bankDetail: true },
+      orderBy: { name: "asc" },
+    });
+    res.json({
+      success: true,
+      data: businesses.map((b) => ({
+        businessId: b.id,
+        name: b.name,
+        city: b.city,
+        email: b.businessEmail,
+        account: publicView(b.bankDetail && b.bankDetail.paystackSubaccountCode ? b.bankDetail : null),
+        // What the restaurant submitted at signup, for the admin to compare against.
+        submittedBank: b.bankDetail && !b.bankDetail.paystackSubaccountCode
+          ? { bankName: b.bankDetail.bankName, accountNumber: b.bankDetail.accountNumber, accountName: b.bankDetail.accountName }
+          : null,
+      })),
+    });
+  } catch (e) {
+    handle(res, e, "Failed to load payment accounts");
+  }
+};
+
 // GET /admin/banks
 exports.listBanks = async (req, res) => {
   try {

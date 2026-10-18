@@ -300,6 +300,13 @@ const submitBankDetails = async (req, res) => {
       return res.status(404).json({ message: "Business not found" });
     }
 
+    const existing = await prisma.businessBankDetail.findUnique({ where: { businessId } });
+    if (existing?.paystackSubaccountCode) {
+      return res.status(403).json({
+        message: "Your payout account is managed by OyaEat. Contact support to change your bank details.",
+      });
+    }
+
     const bankDetail = await prisma.businessBankDetail.upsert({
       where: { businessId },
       update: { bankName, accountName, accountNumber, routingNumber: routingNumber || null },

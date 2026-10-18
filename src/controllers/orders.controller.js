@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const prisma = require("../lib/prisma");
+const { splitFor, splitRequired } = require("../services/paystackSplit");
 const { markOrderPaid, initializeTransaction, PaystackUnreachableError } = require("../services/payments");
 const { getIO } = require("../socket/init");
 
@@ -194,6 +195,15 @@ exports.initializePayment = async (req, res) => {
       items,
     });
 
+    // The restaurant is paid directly through its Paystack subaccount, so it must have one.
+    const split = await splitFor(bizId, total);
+    if (!split && splitRequired()) {
+      return res.status(409).json({
+        success: false,
+        message: "This restaurant can't take online payments yet. Please try another restaurant or pay with cash.",
+      });
+    }
+
     // Save baseline metadata details into your original Order schema rows safely
     const order = await prisma.order.create({
       data: {
@@ -207,6 +217,11 @@ exports.initializePayment = async (req, res) => {
         status: "pending",
         total,
         paymentStatus: "pending",
+        ...(split && {
+          settlementMode: "split",
+          platformFee: split.platformFee,
+          restaurantShare: split.restaurantShare,
+        }),
         items: { create: orderItemsCreate },
       },
       include: {
@@ -232,6 +247,11 @@ exports.initializePayment = async (req, res) => {
         currency: "NGN",
         callback_url: callbackUrl || undefined,
         channels: ["card", "bank_transfer", "ussd", "bank"],
+        ...(split && {
+          subaccount: split.subaccount,
+          transaction_charge: split.transaction_charge,
+          bearer: split.bearer,
+        }),
         metadata: {
           orderId: order.id,
           customerId: userId,

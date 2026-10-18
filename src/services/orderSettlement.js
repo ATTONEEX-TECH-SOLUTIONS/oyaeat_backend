@@ -44,9 +44,12 @@ async function deliverAndSettle(orderId, { allowedFrom }) {
       await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "paid", paidAt: new Date() } });
     }
 
-    const commission = await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT);
-    const vendorShare = order.total - order.total * (commission / 100);
-    await credit(tx, order.business.ownerId, vendorShare, order.id, `Split Earnings for Order Ref: #${order.id}`);
+    // Split-paid orders already sent the restaurant's share straight to its bank via Paystack.
+    if (order.settlementMode !== "split") {
+      const commission = await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT);
+      const vendorShare = order.total - order.total * (commission / 100);
+      await credit(tx, order.business.ownerId, vendorShare, order.id, `Split Earnings for Order Ref: #${order.id}`);
+    }
 
     if (order.riderId && order.payout > 0) {
       await credit(tx, order.riderId, order.payout, order.id, `Delivery Split Fee for Order Ref: #${order.id}`);

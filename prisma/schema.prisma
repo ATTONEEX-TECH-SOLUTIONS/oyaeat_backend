@@ -195,6 +195,13 @@ model BusinessBankDetail {
   accountName   String
   accountNumber String
   routingNumber String?
+
+  // Set by an admin: the Paystack subaccount that receives this restaurant's share of each payment.
+  bankCode              String?
+  paystackSubaccountCode String?
+  commissionPercent     Float?   // per-restaurant override of fees.platformCommission
+  subaccountActive      Boolean  @default(false)
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -255,6 +262,10 @@ model Order {
   notes            String?
   paymentStatus    String?
   paymentReference String?
+  // Split payments: set when the order was paid through the restaurant's Paystack subaccount.
+  settlementMode   String?
+  platformFee      Float?
+  restaurantShare  Float?
   paymentChannel   String?
   paidAt           DateTime?
   status           OrderStatus @default(pending)

@@ -68,6 +68,10 @@ exports.manuallyLinkEmailBank = async (req, res) => {
       const activeBusiness = await prisma.business.findFirst({ where: { ownerId: targetUser.id } });
       if (!activeBusiness) return res.status(404).json({ message: "User is an owner but has no active business." });
 
+      const current = await prisma.businessBankDetail.findUnique({ where: { businessId: activeBusiness.id } });
+      if (current?.paystackSubaccountCode) {
+        return res.status(409).json({ message: "This restaurant already has a Paystack payment account. Edit it from the restaurant's payment account screen." });
+      }
       await prisma.businessBankDetail.upsert({
         where: { businessId: activeBusiness.id },
         update: { bankName, accountNumber, accountName },

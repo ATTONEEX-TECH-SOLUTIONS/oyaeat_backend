@@ -97,6 +97,14 @@ router.get("/settings", authMiddleware, settingsController.getSystemSettings);
 router.patch("/settings", authMiddleware, settingsController.updateSystemSettings);
 router.put("/settings", settingsController.updateSystemSettings);
 
+// ─── Restaurant payment accounts (Paystack subaccounts) ───────
+const paymentAccount = require("../controllers/paymentAccount.controller");
+router.get("/banks", paymentAccount.listBanks);
+router.post("/payment-accounts/resolve", paymentAccount.resolveAccount);
+router.get("/businesses/:businessId/payment-account", paymentAccount.getPaymentAccount);
+router.put("/businesses/:businessId/payment-account", paymentAccount.setPaymentAccount);
+router.delete("/businesses/:businessId/payment-account", paymentAccount.deactivatePaymentAccount);
+
 // Payout tooling is also reachable under /admin (canonical home is /api/wallet/admin)
 const walletController = require("../controllers/wallet.controller");
 router.post("/onboard-bank", walletController.manuallyLinkEmailBank);

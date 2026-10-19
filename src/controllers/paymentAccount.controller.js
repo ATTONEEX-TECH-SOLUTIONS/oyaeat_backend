@@ -20,6 +20,33 @@ const publicView = (bank) =>
     active: bank.subaccountActive,
   };
 
+// GET /admin/payment-accounts — approved restaurants with their payment-account status
+exports.listPaymentAccounts = async (req, res) => {
+  try {
+    const businesses = await prisma.business.findMany({
+      where: { status: "approved" },
+      select: { id: true, name: true, city: true, businessEmail: true, bankDetail: true },
+      orderBy: { name: "asc" },
+    });
+    res.json({
+      success: true,
+      data: businesses.map((b) => ({
+        businessId: b.id,
+        name: b.name,
+        city: b.city,
+        email: b.businessEmail,
+        account: publicView(b.bankDetail && b.bankDetail.paystackSubaccountCode ? b.bankDetail : null),
+        // What the restaurant submitted at signup, for the admin to compare against.
+        submittedBank: b.bankDetail && !b.bankDetail.paystackSubaccountCode
+          ? { bankName: b.bankDetail.bankName, accountNumber: b.bankDetail.accountNumber, accountName: b.bankDetail.accountName }
+          : null,
+      })),
+    });
+  } catch (e) {
+    handle(res, e, "Failed to load payment accounts");
+  }
+};
+
 // GET /admin/banks
 exports.listBanks = async (req, res) => {
   try {
@@ -122,5 +149,111 @@ exports.deactivatePaymentAccount = async (req, res) => {
     res.json({ success: true, data: publicView(updated) });
   } catch (e) {
     handle(res, e, "Failed to deactivate the payment account");
+  }
+};
+
+// ─── Riders: Paystack transfer recipients ─────────────────────
+
+// GET /admin/rider-payout-accounts
+exports.listRiderAccounts = async (req, res) => {
+  try {
+    const riders = await prisma.riderProfile.findMany({
+      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({
+      success: true,
+      data: riders.map((r) => ({
+        userId: r.userId,
+        name: `${r.user.firstName} ${r.user.lastName}`.trim(),
+        email: r.user.email,
+        account: r.paystackRecipientCode
+          ? { bankName: r.bankName, bankCode: r.bankCode, accountName: r.accountName, accountNumber: r.accountNumber, active: true }
+          : null,
+        submittedBank: !r.paystackRecipientCode && r.bankName
+          ? { bankName: r.bankName, accountNumber: r.accountNumber, accountName: r.accountName }
+          : null,
+      })),
+    });
+  } catch (e) {
+    handle(res, e, "Failed to load riders");
+  }
+};
+
+// PUT /admin/riders/:userId/payout-account  { bankCode, bankName, accountNumber }
+exports.setRiderAccount = async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const { bankCode, bankName, accountNumber } = req.body;
+  if (!bankCode || !bankName || !/^\d{10}$/.test(String(accountNumber || ""))) {
+    return res.status(400).json({ success: false, message: "bankCode, bankName and a 10-digit accountNumber are required" });
+  }
+  try {
+    const profile = await prisma.riderProfile.findUnique({ where: { userId } });
+    if (!profile) return res.status(404).json({ success: false, message: "Rider not found" });
+
+    const resolved = await split.resolveAccount(accountNumber, bankCode);
+    const recipient = await split.createTransferRecipient({ name: resolved.account_name, accountNumber, bankCode });
+    const updated = await prisma.riderProfile.update({
+      where: { userId },
+      data: {
+        bankName,
+        bankCode,
+        accountNumber,
+        accountName: resolved.account_name,
+        paystackRecipientCode: recipient.recipient_code,
+      },
+    });
+    res.json({
+      success: true,
+      data: { bankName: updated.bankName, bankCode, accountName: updated.accountName, accountNumber, active: true },
+    });
+  } catch (e) {
+    handle(res, e, "Failed to set up the rider's payout account");
+  }
+};
+
+// ─── Cash orders: commission restaurants owe ──────────────────
+
+// GET /admin/cash-commissions
+exports.listCashCommissions = async (req, res) => {
+  try {
+    const wallets = await prisma.wallet.findMany({
+      where: { balance: { lt: 0 }, user: { role: "owner" } },
+      include: { user: { include: { businesses: { select: { id: true, name: true } } } } },
+    });
+    res.json({
+      success: true,
+      data: wallets.map((w) => ({
+        userId: w.userId,
+        businessId: w.user.businesses[0]?.id || null,
+        name: w.user.businesses[0]?.name || `${w.user.firstName} ${w.user.lastName}`,
+        owed: Math.round(-w.balance * 100) / 100,
+      })),
+    });
+  } catch (e) {
+    handle(res, e, "Failed to load cash commissions");
+  }
+};
+
+// POST /admin/cash-commissions/:userId/settle  { amount }  — record cash commission received from a restaurant
+exports.settleCashCommission = async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const amount = Number(req.body.amount);
+  if (!(amount > 0)) return res.status(400).json({ success: false, message: "Enter the amount received" });
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const wallet = await tx.wallet.findUnique({ where: { userId } });
+      if (!wallet || wallet.balance >= 0) return { error: "This restaurant owes nothing" };
+      if (amount > -wallet.balance + 0.005) return { error: "That is more than the restaurant owes" };
+      await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: amount } } });
+      await tx.walletTransaction.create({
+        data: { walletId: wallet.id, amount, type: "credit", status: "completed", description: "Cash commission payment received" },
+      });
+      return { owed: Math.round((-wallet.balance - amount) * 100) / 100 };
+    });
+    if (result.error) return res.status(409).json({ success: false, message: result.error });
+    res.json({ success: true, data: result });
+  } catch (e) {
+    handle(res, e, "Failed to record the payment");
   }
 };

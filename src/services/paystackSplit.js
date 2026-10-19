@@ -55,6 +55,20 @@ async function upsertSubaccount({ existingCode, businessName, bankCode, accountN
     : paystack("POST", "/subaccount", payload);
 }
 
+/** Registers a bank account that Paystack can send transfers to (riders). */
+const createTransferRecipient = ({ name, accountNumber, bankCode }) =>
+  paystack("POST", "/transferrecipient", {
+    type: "nuban",
+    name,
+    account_number: accountNumber,
+    bank_code: bankCode,
+    currency: "NGN",
+  });
+
+/** Sends money from the platform's Paystack balance. `reference` makes retries safe. */
+const initiateTransfer = ({ amountKobo, recipient, reference, reason }) =>
+  paystack("POST", "/transfer", { source: "balance", amount: amountKobo, recipient, reference, reason });
+
 const deactivateSubaccount = (code) => paystack("PUT", `/subaccount/${code}`, { active: false });
 
 async function platformCommissionPercent(businessBank) {
@@ -94,6 +108,8 @@ module.exports = {
   resolveAccount,
   upsertSubaccount,
   deactivateSubaccount,
+  createTransferRecipient,
+  initiateTransfer,
   platformCommissionPercent,
   splitRequired,
   splitFor,

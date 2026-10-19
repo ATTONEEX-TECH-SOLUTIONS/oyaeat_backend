@@ -94,6 +94,7 @@ router.delete("/staff/:staffId",  vendorStaffController.deleteStaff);
 
 // ─── Reviews ─────────────────────────────────────────────────
 router.get("/reviews", require("../controllers/review.controller").getVendorReviews);
+router.get("/earnings", require("../controllers/vendor.earnings.controller").getEarnings);
 
 // ─── Orders ──────────────────────────────────────────────────
 router.get(  "/orders",                    vendorOrdersController.getOrders);

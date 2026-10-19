@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { payRiderForOrder } = require("./riderPayout");
 
 const DEFAULT_COMMISSION_PERCENT = 15.0;
 const DEFAULT_RIDER_FEE = 1200.0;
@@ -20,6 +21,18 @@ async function credit(tx, userId, amount, orderId, description) {
   });
 }
 
+// Records money the restaurant owes the platform (negative wallet balance).
+async function debitOwed(tx, userId, amount, orderId, description) {
+  const wallet = await tx.wallet.upsert({
+    where: { userId },
+    update: { balance: { decrement: amount } },
+    create: { userId, balance: -amount },
+  });
+  await tx.walletTransaction.create({
+    data: { walletId: wallet.id, amount, type: "debit", status: "completed", description, orderId },
+  });
+}
+
 /**
  * Marks an order delivered and credits the vendor (and rider) wallets, atomically.
  * Safe to call repeatedly: only the call that actually flips the status to
@@ -27,7 +40,7 @@ async function credit(tx, userId, amount, orderId, description) {
  * was already delivered / cancelled.
  */
 async function deliverAndSettle(orderId, { allowedFrom }) {
-  return prisma.$transaction(async (tx) => {
+  const settled = await prisma.$transaction(async (tx) => {
     const claimed = await tx.order.updateMany({
       where: { id: orderId, status: { in: allowedFrom } },
       data: { status: "delivered" },
@@ -44,11 +57,20 @@ async function deliverAndSettle(orderId, { allowedFrom }) {
       await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "paid", paidAt: new Date() } });
     }
 
-    // Split-paid orders already sent the restaurant's share straight to its bank via Paystack.
-    if (order.settlementMode !== "split") {
+    if (order.settlementMode === "split") {
+      // The restaurant's share already went straight to its bank via Paystack.
+    } else if (order.paymentMethod === "paystack") {
+      // Paid online before restaurants had payment accounts: platform holds the money, so credit the restaurant's wallet.
       const commission = await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT);
       const vendorShare = order.total - order.total * (commission / 100);
       await credit(tx, order.business.ownerId, vendorShare, order.id, `Split Earnings for Order Ref: #${order.id}`);
+    } else {
+      // Cash order: the restaurant keeps the cash, so it owes the platform its commission.
+      const bank = await tx.businessBankDetail.findUnique({ where: { businessId: order.businessId } });
+      const commission =
+        bank?.commissionPercent ?? (await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT));
+      const owed = Math.round(order.total * commission) / 100;
+      if (owed > 0) await debitOwed(tx, order.business.ownerId, owed, order.id, `Commission owed on cash order #${order.id}`);
     }
 
     if (order.riderId && order.payout > 0) {
@@ -56,6 +78,9 @@ async function deliverAndSettle(orderId, { allowedFrom }) {
     }
     return order;
   });
+  // Outside the transaction: a slow or failed transfer must never undo the delivery.
+  if (settled) await payRiderForOrder(orderId);
+  return settled;
 }
 
 async function defaultRiderFee() {

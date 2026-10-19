@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const prisma = require("../lib/prisma");
+const { handleTransferEvent } = require("../services/riderPayout");
 const { splitFor, splitRequired } = require("../services/paystackSplit");
 const { markOrderPaid, initializeTransaction, PaystackUnreachableError } = require("../services/payments");
 const { getIO } = require("../socket/init");
@@ -403,6 +404,9 @@ exports.paystackWebhook = async (req, res) => {
       const tx = event.data || {};
       const order = await prisma.order.findFirst({ where: { paymentReference: tx.reference } });
       if (order) await markOrderPaid(order.id, tx);
+    }
+    if (typeof event?.event === "string" && event.event.startsWith("transfer.")) {
+      await handleTransferEvent(event);
     }
     // Always acknowledge a correctly signed call so Paystack stops retrying.
     return res.sendStatus(200);

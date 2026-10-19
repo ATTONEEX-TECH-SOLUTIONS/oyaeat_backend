@@ -342,6 +342,10 @@ model RiderProfile {
   bankName      String?
   accountName   String?
   accountNumber String? @db.VarChar(10)
+
+  // Set by an admin: Paystack transfer recipient used to pay delivery fees automatically.
+  bankCode               String?
+  paystackRecipientCode  String?
 }
 
 model RiderAlert {

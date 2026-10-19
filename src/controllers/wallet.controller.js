@@ -272,7 +272,9 @@ exports.getAdminFinancialQueueLogs = async (req, res) => {
     const pendingTransactions = await prisma.walletTransaction.findMany({
       where: {
         status: "pending",
-        type: "debit"
+        type: "debit",
+        // Automatic Paystack transfers are tracked by Paystack, not paid by hand.
+        NOT: { description: { startsWith: "Automatic delivery payout" } }
       },
       include: {
         wallet: {

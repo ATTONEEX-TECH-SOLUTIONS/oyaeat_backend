@@ -11,6 +11,7 @@ router.use(authMiddleware);
 // ── Customer routes ──
 router.post("/", requireRole("customer"), ordersController.createOrder);
 router.get("/my", requireRole("customer"), ordersController.getMyOrders);
+router.post("/delivery-quote", requireRole("customer"), ordersController.getDeliveryQuote);
 router.post("/initialize-payment", requireRole("customer"), ordersController.initializePayment);
 router.get("/verify-payment/:reference", requireRole("customer"), ordersController.verifyPayment);
 router.post("/:id/cancel", requireRole("customer"), ordersController.cancelMyOrder);

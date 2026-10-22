@@ -4,6 +4,7 @@ const { handleTransferEvent } = require("../services/riderPayout");
 const { splitFor, splitRequired } = require("../services/paystackSplit");
 const { markOrderPaid, initializeTransaction, PaystackUnreachableError } = require("../services/payments");
 const { getIO } = require("../socket/init");
+const { quoteDelivery } = require("../services/deliveryFee");
 
 // Small helper to validate cart and calculate total securely from DB
 async function validateOrderInput({ businessId, items }) {
@@ -77,6 +78,36 @@ async function validateOrderInput({ businessId, items }) {
   };
 }
 
+// Fields stored on an order so a later settings change never reprices it.
+function deliveryFields(delivery, body) {
+  const lat = body.customerLatitude == null ? NaN : Number(body.customerLatitude);
+  const lng = body.customerLongitude == null ? NaN : Number(body.customerLongitude);
+  return {
+    deliveryFee: delivery.deliveryFee,
+    payout: delivery.riderPayout,
+    distanceKm: delivery.distanceKm,
+    customerLatitude: Number.isFinite(lat) ? lat : null,
+    customerLongitude: Number.isFinite(lng) ? lng : null,
+  };
+}
+
+// POST /orders/delivery-quote
+// Body: { businessId, customerLatitude?, customerLongitude? }  ->  { deliveryFee, distanceKm }
+exports.getDeliveryQuote = async (req, res) => {
+  try {
+    const businessId = Number(req.body.businessId);
+    if (!businessId) return res.status(400).json({ success: false, message: "businessId is required" });
+    const q = await quoteDelivery({
+      businessId,
+      customerLatitude: req.body.customerLatitude,
+      customerLongitude: req.body.customerLongitude,
+    });
+    res.json({ success: true, data: { deliveryFee: q.deliveryFee, distanceKm: q.distanceKm } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "Couldn't work out the delivery fee", error: e.message });
+  }
+};
+
 // POST /orders
 // Body: { businessId, customerName, customerPhone?, address?, paymentMethod?, notes?, items: [{ menuItemId, quantity }] }
 exports.createOrder = async (req, res) => {
@@ -116,10 +147,17 @@ exports.createOrder = async (req, res) => {
         .json({ success: false, message: "customerName is required" });
     }
 
-    const { bizId, total, orderItemsCreate } = await validateOrderInput({
+    const { bizId, total: foodTotal, orderItemsCreate } = await validateOrderInput({
       businessId,
       items,
     });
+    // Priced here, never taken from the client.
+    const delivery = await quoteDelivery({
+      businessId: bizId,
+      customerLatitude: req.body.customerLatitude,
+      customerLongitude: req.body.customerLongitude,
+    });
+    const total = foodTotal + delivery.deliveryFee;
 
     const order = await prisma.order.create({
       data: {
@@ -132,6 +170,7 @@ exports.createOrder = async (req, res) => {
         notes: notes || null,
         status: "pending",
         total,
+        ...deliveryFields(delivery, req.body),
         paymentStatus: paymentMethod === "cash" ? "pending" : "pending",
         items: { create: orderItemsCreate },
       },
@@ -191,13 +230,20 @@ exports.initializePayment = async (req, res) => {
     }
 
     // Validate incoming order payloads safely
-    const { bizId, total, orderItemsCreate } = await validateOrderInput({
+    const { bizId, total: foodTotal, orderItemsCreate } = await validateOrderInput({
       businessId,
       items,
     });
+    // Priced here, never taken from the client.
+    const delivery = await quoteDelivery({
+      businessId: bizId,
+      customerLatitude: req.body.customerLatitude,
+      customerLongitude: req.body.customerLongitude,
+    });
+    const total = foodTotal + delivery.deliveryFee;
 
     // The restaurant is paid directly through its Paystack subaccount, so it must have one.
-    const split = await splitFor(bizId, total);
+    const split = await splitFor(bizId, foodTotal, delivery.deliveryFee);
     if (!split && splitRequired()) {
       return res.status(409).json({
         success: false,
@@ -217,6 +263,7 @@ exports.initializePayment = async (req, res) => {
         notes: notes || null,
         status: "pending",
         total,
+        ...deliveryFields(delivery, req.body),
         paymentStatus: "pending",
         ...(split && {
           settlementMode: "split",

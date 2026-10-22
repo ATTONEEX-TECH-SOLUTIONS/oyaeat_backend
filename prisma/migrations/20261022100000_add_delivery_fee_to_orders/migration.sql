@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN "deliveryFee" DOUBLE PRECISION,
+ADD COLUMN "distanceKm" DOUBLE PRECISION,
+ADD COLUMN "customerLatitude" DOUBLE PRECISION,
+ADD COLUMN "customerLongitude" DOUBLE PRECISION;

@@ -93,7 +93,7 @@ exports.getDashboard = async (req, res) => {
         dropoff: rawActiveOrder.address || "No address provided",
         payout: `₦${rawActiveOrder.payout?.toLocaleString() || "1,200"}`,
         status: rawActiveOrder.status,
-        distance: "3.2 km" // Standard fallback placeholder string
+        distance: rawActiveOrder.distanceKm != null ? `${rawActiveOrder.distanceKm} km` : "—"
       };
     }
 

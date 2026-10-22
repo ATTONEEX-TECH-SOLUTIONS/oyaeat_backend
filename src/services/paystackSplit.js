@@ -81,24 +81,26 @@ async function platformCommissionPercent(businessBank) {
 const splitRequired = () => String(process.env.PAYMENT_SPLIT_REQUIRED ?? "true").toLowerCase() !== "false";
 
 /**
- * Works out how a payment of `total` (naira) is divided for a restaurant.
+ * Works out how a payment of `foodTotal` plus `deliveryFee` (naira) is divided.
  * Returns null when the restaurant has no active subaccount.
- * The platform's fee goes in `transaction_charge` (kobo); Paystack sends the rest to
- * the restaurant's bank. The platform account bears Paystack's processing fee.
+ * The platform's commission on the food plus the whole delivery fee goes in
+ * `transaction_charge` (kobo); Paystack sends the rest to the restaurant's bank. The platform account bears Paystack's processing fee.
  */
-async function splitFor(businessId, total) {
+async function splitFor(businessId, foodTotal, deliveryFee = 0) {
   const bank = await prisma.businessBankDetail.findUnique({ where: { businessId } });
   if (!bank?.subaccountActive || !bank.paystackSubaccountCode) return null;
 
   const percent = await platformCommissionPercent(bank);
-  const totalKobo = Math.round(total * 100);
-  const feeKobo = Math.min(totalKobo - 1, Math.max(0, Math.round((totalKobo * percent) / 100)));
+  const foodKobo = Math.round(foodTotal * 100);
+  const commissionKobo = Math.min(foodKobo - 1, Math.max(0, Math.round((foodKobo * percent) / 100)));
+  // The delivery fee is not the restaurant's: the platform keeps it and pays the rider from it.
+  const feeKobo = commissionKobo + Math.round(deliveryFee * 100);
   return {
     subaccount: bank.paystackSubaccountCode,
     transaction_charge: feeKobo,
     bearer: "account",
     platformFee: feeKobo / 100,
-    restaurantShare: (totalKobo - feeKobo) / 100,
+    restaurantShare: (foodKobo - commissionKobo) / 100,
   };
 }
 

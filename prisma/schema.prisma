@@ -269,7 +269,12 @@ model Order {
   paymentChannel   String?
   paidAt           DateTime?
   status           OrderStatus @default(pending)
+  // total = food + deliveryFee. payout is the rider's share of deliveryFee, fixed when the order is placed.
   total            Float
+  deliveryFee      Float?
+  distanceKm       Float?
+  customerLatitude  Float?
+  customerLongitude Float?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   items            OrderItem[]

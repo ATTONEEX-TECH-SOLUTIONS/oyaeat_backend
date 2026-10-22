@@ -18,6 +18,7 @@ exports.getUserWalletSummary = async (req, res) => {
 
     // 2. Fetch linked bank account info based on the authenticated user's role profile
     let linkedBankAccount = "Not setup yet. Please email support.";
+    let bankVerified = true; // restaurants are verified when their payment account is created
     
     if (userRole === "owner" || userRole === "admin") {
       const business = await prisma.business.findFirst({
@@ -34,6 +35,8 @@ exports.getUserWalletSummary = async (req, res) => {
       if (riderProfile?.bankName) {
         linkedBankAccount = `${riderProfile.bankName} - ${riderProfile.accountNumber} (${riderProfile.accountName})`;
       }
+      // Riders are paid through Paystack, so the account only counts once it has a transfer recipient.
+      bankVerified = !!riderProfile?.paystackRecipientCode;
     }
 
     // ── 🌟 FIXED PAYLOAD: MATCHES FRONTEND UNIFIED STRUCTURAL EXPECTATIONS ──
@@ -45,7 +48,8 @@ exports.getUserWalletSummary = async (req, res) => {
           pendingPayouts: wallet ? wallet.pendingPayouts : 0.0,
           transactions: wallet ? wallet.transactions : []
         },
-        hasBankDetails: linkedBankAccount !== "Not setup yet. Please email support.",
+        hasBankDetails: linkedBankAccount !== "Not setup yet. Please email support." && bankVerified,
+        bankVerified,
         linkedBankAccount: linkedBankAccount
       }
     });
@@ -80,7 +84,9 @@ exports.manuallyLinkEmailBank = async (req, res) => {
     } else if (userType === "rider") {
       await prisma.riderProfile.upsert({
         where: { userId: targetUser.id },
-        update: { bankName, accountNumber, accountName },
+        // New details are unverified: drop any old Paystack recipient so automatic payouts
+        // never go to the previous account. Verify via the payout-account screen.
+        update: { bankName, accountNumber, accountName, bankCode: null, paystackRecipientCode: null },
         create: { 
           userId: targetUser.id, 
           bankName, 
@@ -164,7 +170,13 @@ exports.requestWithdrawal = async (req, res) => {
       const riderProfile = await prisma.riderProfile.findUnique({
         where: { userId }
       });
-      if (riderProfile?.bankName) hasMappedBank = true;
+      if (riderProfile?.bankName && !riderProfile.paystackRecipientCode) {
+        return res.status(400).json({
+          success: false,
+          message: "Payout blocked: your bank account hasn't been verified yet. Please contact support to finish setting it up."
+        });
+      }
+      if (riderProfile?.paystackRecipientCode) hasMappedBank = true;
     }
 
     if (!hasMappedBank) {
@@ -325,13 +337,16 @@ exports.getAdminFinancialQueueLogs = async (req, res) => {
     });
 
     // 3. Aggregate all wallet metrics across your system for your dashboard stats cards
-    const wallets = await prisma.wallet.findMany();
+    // What the platform holds for each group: money in wallets plus payouts already requested.
+    // Restaurants that owe commission have negative balances; those are not money owed to them.
+    const wallets = await prisma.wallet.findMany({ include: { user: { select: { role: true } } } });
     let restaurantOwedPool = 0;
     let riderOwedPool = 0;
 
     wallets.forEach(w => {
-      if (w.userId === req.user.id) return; 
-      restaurantOwedPool += w.balance + w.pendingPayouts;
+      const owed = Math.max(w.balance, 0) + w.pendingPayouts;
+      if (w.user?.role === "owner") restaurantOwedPool += owed;
+      else if (w.user?.role === "rider") riderOwedPool += owed;
     });
 
     // ── 🌟 NEW PART: FETCH AND FORMAT RECENTLY LINKED EMAIL BANK ACCOUNTS ──
@@ -376,7 +391,7 @@ exports.getAdminFinancialQueueLogs = async (req, res) => {
         totalPlatformVolume: restaurantOwedPool * 1.15, 
         totalAdminCommission: restaurantOwedPool * 0.15,
         restaurantOwedPool,
-        riderOwedPool: wallets.reduce((acc, w) => acc + (w.userId ? w.balance : 0), 0) * 0.2 
+        riderOwedPool
       }
     };
 

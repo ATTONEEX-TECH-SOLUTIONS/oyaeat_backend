@@ -57,20 +57,25 @@ async function deliverAndSettle(orderId, { allowedFrom }) {
       await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "paid", paidAt: new Date() } });
     }
 
+    // The delivery fee belongs to the platform; commission and the restaurant's share are on the food only.
+    const deliveryFee = order.deliveryFee ?? 0;
+    const food = order.total - deliveryFee;
+
     if (order.settlementMode === "split") {
       // The restaurant's share already went straight to its bank via Paystack.
     } else if (order.paymentMethod === "paystack") {
       // Paid online before restaurants had payment accounts: platform holds the money, so credit the restaurant's wallet.
       const commission = await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT);
-      const vendorShare = order.total - order.total * (commission / 100);
+      const vendorShare = food - food * (commission / 100);
       await credit(tx, order.business.ownerId, vendorShare, order.id, `Split Earnings for Order Ref: #${order.id}`);
     } else {
-      // Cash order: the restaurant keeps the cash, so it owes the platform its commission.
+      // Cash order: the restaurant keeps the cash, so it owes the platform its commission
+      // plus the delivery fee, which the platform pays on to the rider.
       const bank = await tx.businessBankDetail.findUnique({ where: { businessId: order.businessId } });
       const commission =
         bank?.commissionPercent ?? (await getNumericSetting(tx, "fees.platformCommission", DEFAULT_COMMISSION_PERCENT));
-      const owed = Math.round(order.total * commission) / 100;
-      if (owed > 0) await debitOwed(tx, order.business.ownerId, owed, order.id, `Commission owed on cash order #${order.id}`);
+      const owed = Math.round(food * commission) / 100 + deliveryFee;
+      if (owed > 0) await debitOwed(tx, order.business.ownerId, owed, order.id, `Commission and delivery fee owed on cash order #${order.id}`);
     }
 
     if (order.riderId && order.payout > 0) {

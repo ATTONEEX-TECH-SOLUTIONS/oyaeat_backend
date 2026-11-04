@@ -10,7 +10,10 @@ let io = null;
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: "*", // Adjust this to match your specific Next.js production domains later
+      origin: [
+        "https://oyaeat.com.ng",
+        "https://www.oyaeat.com.ng"
+      ],
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
     }
   });

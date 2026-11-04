@@ -17,7 +17,6 @@ const initSocket = (httpServer) => {
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
     }
   });
-
   // Authentication Middleware: Safely decodes JWTs before permitting open streams
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(" ")[1];

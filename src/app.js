@@ -18,7 +18,14 @@ if (process.env.TRUST_PROXY) {
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+const allowedOrigins = [
+  'https://oyaeat.com.ng',
+  'https://www.oyaeat.com.ng'
+];
+
+app.use(cors({
+  origin: allowedOrigins
+}));
 app.use(morgan('dev'));
 // keep the raw bytes: Paystack signs the exact body it sends
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));

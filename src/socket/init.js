@@ -10,10 +10,10 @@ let io = null;
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: [
-        "https://oyaeat.com.ng",
-        "https://www.oyaeat.com.ng"
-      ],
+      origin: (process.env.FRONTEND_URL || '')
+        .split(',')
+        .map(origin => origin.trim())
+        .filter(Boolean),
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
     }
   });
